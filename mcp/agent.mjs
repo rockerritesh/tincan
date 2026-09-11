@@ -135,20 +135,43 @@ export class AgentLink {
   }
 
   // The broker is authoritative for status; the local book is authoritative
-  // for names. Diffing first means a pairing made elsewhere is already in the
-  // book by the time the list is rendered. The diff's events are dropped here
-  // rather than returned: the listing already shows the resulting state, so
-  // nothing is hidden — it just stops being news on the next check_inbox.
+  // for names.
+  //
+  // This deliberately does NOT call peerBook.diff(): diff() reports by
+  // mutating, so listing through it would leave a brand-new peer looking
+  // already-known-and-unchanged, and the check_inbox tick that owes the agent
+  // a peer_linked event would silently have nothing to say. Consuming events
+  // is checkInbox's job alone.
+  //
+  // A peer the broker reports but this machine has not recorded yet is still
+  // shown — this is the tool that answers "did my pairing work?" — but as a
+  // read-only preview: aliased by its short fingerprint rather than its
+  // advertised label, because the real alias is only decided when
+  // upsert()/#freeAlias reserves one, and flagged `pending` so nobody tries to
+  // address it before the tick has persisted it.
   async listPeers() {
     const { peers } = await this.client.peers();
-    this.peerBook.diff(peers);
     const remote = new Map(peers.map((p) => [p.fingerprint, p]));
-    return {
-      peers: this.peerBook.list().map((p) => ({
-        ...p,
-        status: remote.get(p.fingerprint)?.status ?? p.status,
-      })),
-    };
+    const known = this.peerBook.list().map((p) => ({
+      ...p,
+      status: remote.get(p.fingerprint)?.status ?? p.status,
+      pending: false,
+    }));
+    const recorded = new Set(known.map((p) => p.fingerprint));
+    const previews = peers
+      .filter((p) => !recorded.has(p.fingerprint))
+      .map((p) => ({
+        alias: shortFingerprint(p.fingerprint),
+        fingerprint: p.fingerprint,
+        short: p.short ?? shortFingerprint(p.fingerprint),
+        verified: false,
+        status: p.status,
+        linked_at: p.linked_at ?? null,
+        advertised_label: p.label ?? null,
+        pending: true,
+        action: 'not in the local peer book yet — run check_inbox to name it, then send to that alias',
+      }));
+    return { peers: [...known, ...previews] };
   }
 
   // Async so a mismatch surfaces as a rejected promise like every other

@@ -29,9 +29,12 @@ const TOOLS = [
   {
     name: 'check_inbox',
     description:
-      'Monitor tick. Returns new messages addressed to this agent, any transfer offers waiting on this ' +
-      'agent to accept or reject, and updates on offers this agent sent (accepted payloads upload during ' +
-      'this call). Call on an interval to stay in sync with the other agent. `quiet: true` means nothing happened.',
+      'Monitor tick, and the only place four kinds of news arrive: new messages addressed to this agent, ' +
+      'transfer offers waiting on this agent to accept or reject, updates on offers this agent sent ' +
+      '(accepted payloads upload during this call), and peer events in `peer_events` — agents newly ' +
+      'connected to this one, under the local alias assigned here, and connections that have been revoked ' +
+      'by either side. Call on an interval to stay in sync with the other agent. `quiet: true` means all ' +
+      'four were empty.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: () => link.checkInbox(),
   },
@@ -185,7 +188,9 @@ const TOOLS = [
     name: 'list_peers',
     description:
       'Agents this one is connected to: local alias, short fingerprint, whether it has been verified out '
-      + 'of band, and whether the connection is active or revoked.',
+      + 'of band, and whether the connection is active or revoked. A peer the broker already knows but '
+      + 'this machine has not named yet is listed with `pending: true` under a placeholder alias; run '
+      + 'check_inbox to give it a real one before addressing it.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: () => link.listPeers(),
   },

@@ -87,6 +87,38 @@ test('a new peer shows up as a peer_linked event on the next tick', async (t) =>
   assert.ok(tick.peer_events.linked[0].short);
 });
 
+// list_peers must be able to answer "did my pairing work?" without stealing the
+// event check_inbox owes the monitor loop. The ordering is the whole test:
+// listing first, then ticking, and the event still has to arrive.
+test('list_peers previews a new peer without consuming its peer_linked event', async (t) => {
+  const { broker, alice } = await pairedAgents(t);
+  const homeC = tempDir('home-c');
+  t.after(() => fs.rmSync(homeC, { recursive: true, force: true }));
+
+  const carol = new AgentLink({ baseUrl: broker.baseUrl, label: 'carol', home: homeC });
+  const { code } = await alice.createInvite({});
+  await carol.redeemInvite({ code });
+
+  const listed = await alice.listPeers();
+  const preview = listed.peers.find((p) => p.fingerprint === carol.identityRecord.fingerprint);
+  assert.equal(preview.pending, true);
+  assert.equal(preview.status, 'active');
+  // Previewed under its short fingerprint, not its advertised label: the real
+  // alias is only decided when check_inbox reserves it.
+  assert.equal(preview.alias, carol.identityRecord.short);
+  assert.equal(preview.advertised_label, 'carol');
+
+  const tick = await alice.checkInbox();
+  assert.equal(tick.peer_events.linked.length, 1);
+  assert.equal(tick.peer_events.linked[0].alias, 'carol');
+
+  const after = await alice.listPeers();
+  const row = after.peers.find((p) => p.alias === 'carol');
+  assert.equal(row.pending, false);
+  assert.equal(row.fingerprint, carol.identityRecord.fingerprint);
+  assert.equal(after.peers.filter((p) => p.pending).length, 0);
+});
+
 test('verify_peer confirms a matching fingerprint and rejects a wrong one', async (t) => {
   const { alice, bob } = await pairedAgents(t);
   const bobShort = (await bob.identity()).short;

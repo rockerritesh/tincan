@@ -139,3 +139,12 @@ echo "local health:"
 curl -sf http://127.0.0.1:8787/v1/health || echo "  LOCAL HEALTH FAILED"
 echo
 echo "PUBLIC_URL=${URL:-NONE}"
+
+echo "==> bootstrap invite"
+if [ ! -f "$DATA_DIR/.bootstrapped" ]; then
+  sudo -u "$SVC_USER" /usr/bin/node "$APP_DIR/server/bootstrap.mjs" \
+    --data-dir "$DATA_DIR" --label "owner" --ttl-minutes 60
+  sudo -u "$SVC_USER" touch "$DATA_DIR/.bootstrapped"
+else
+  echo "already bootstrapped; run server/bootstrap.mjs by hand to mint another invite"
+fi

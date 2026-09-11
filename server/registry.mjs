@@ -205,16 +205,31 @@ export class Registry {
     return path.join(this.dirs.invites, `${codeSha256}.json`);
   }
 
-  createInvite({ issuer, issuerLabel, ttlMs = INVITE_TTL_MS, now = Date.now() }) {
-    requireFingerprint(issuer, 'issuer');
+  // A bootstrap invite (bootstrap: true) has no issuer at all — it is minted
+  // from the filesystem side before any identity exists on this broker, so
+  // there is no one to name. Registering a pseudo-identity purely to fill
+  // that field would be a standing entry in the registry that authorizes
+  // everything, for no benefit; issuer: null says plainly that none exists.
+  // A normal invite keeps the existing validation unchanged.
+  createInvite({
+    issuer = null, issuerLabel = null, ttlMs = INVITE_TTL_MS, now = Date.now(), bootstrap = false,
+  } = {}) {
+    if (bootstrap) {
+      if (issuer != null) {
+        throw new StoreError('invalid_bootstrap_invite', 'a bootstrap invite must not name an issuer', 400);
+      }
+    } else {
+      requireFingerprint(issuer, 'issuer');
+    }
     const raw = encodeBase32(crypto.randomBytes(CODE_BYTES)).slice(0, 16);
     const code = raw.match(/.{1,4}/g).join('-');
     const code_sha256 = hashCode(code);
     const invite = {
       id: `inv_${crypto.randomBytes(6).toString('hex')}`,
       code_sha256,
-      issuer,
-      issuer_label: issuerLabel ?? issuer,
+      issuer: bootstrap ? null : issuer,
+      issuer_label: bootstrap ? null : (issuerLabel ?? issuer),
+      bootstrap,
       status: 'open',
       created_at: nowIso(now),
       expires_at: nowIso(now + ttlMs),

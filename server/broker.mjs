@@ -16,6 +16,7 @@ import { Store, StoreError, MAX_INLINE_BYTES } from './store.mjs';
 import { Registry } from './registry.mjs';
 import { createVerifier } from './verify.mjs';
 import { requireActiveLink, assertParticipant, assertTwoPartyThread, scopeThreads } from './authz.mjs';
+import { shortFingerprint } from '../shared/fingerprint.mjs';
 
 const MAX_JSON_BYTES = 1 * 1024 * 1024;
 const MAX_BLOB_BYTES = Number(process.env.MAX_BLOB_BYTES ?? 64 * 1024 * 1024);
@@ -233,6 +234,94 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
           throw new StoreError('not_found', 'no such thread', 404);
         }
         return done(200, { thread_id: id, events });
+      }
+
+      // ---- pairing --------------------------------------------------------
+      if (resource === 'invites' && method === 'POST' && !id) {
+        const b = await jsonBody();
+        const key = registry.getKey(caller.fingerprint);
+        const { invite, code } = registry.createInvite({
+          issuer: caller.fingerprint,
+          issuerLabel: key?.label ?? caller.fingerprint,
+          ttlMs: Number.isInteger(b.ttl_ms) && b.ttl_ms > 0 ? b.ttl_ms : undefined,
+        });
+        // The code is disclosed here and nowhere else, ever.
+        return done(201, {
+          invite: { id: invite.id, expires_at: invite.expires_at, status: invite.status },
+          code,
+        });
+      }
+
+      if (isRedeem) {
+        const b = await jsonBody();
+        if (typeof b.code !== 'string' || b.code.trim() === '') {
+          throw new StoreError('missing_code', 'a code is required', 400);
+        }
+
+        // allowUnregistered is what lets a key the broker has never seen reach
+        // this route — that is the whole point of redeem. But verify.mjs's
+        // registry check is skipped entirely for this route, which means a
+        // key the broker knows to be revoked would otherwise sail through
+        // too. registerKey is idempotent (it returns the existing revoked
+        // record unchanged), so a revoked caller gains no usable access from
+        // this — but it would still burn someone else's invite and leave a
+        // dead link behind. Reject it explicitly, before the invite is
+        // consumed.
+        const callerKey = registry.getKey(caller.fingerprint);
+        if (callerKey && callerKey.status !== 'active') {
+          throw new StoreError('revoked_key', 'this key has been revoked', 403);
+        }
+
+        // Peek before consuming so a revoked issuer fails without burning the
+        // code. A bootstrap invite has no issuer to check.
+        const peek = registry.getInviteByCode(b.code);
+        if (peek && !peek.bootstrap && registry.getKey(peek.issuer)?.status !== 'active') {
+          throw new StoreError('issuer_revoked', 'the agent who issued this invite is no longer active', 409);
+        }
+
+        const invite = registry.consumeInvite({ code: b.code, redeemer: caller.fingerprint });
+        const key = registry.registerKey({
+          fingerprint: caller.fingerprint,
+          publicKeyB64: caller.publicKeyB64,
+          label: typeof b.label === 'string' && b.label ? b.label : caller.fingerprint,
+          via: invite.id,
+        });
+
+        // A bootstrap invite has no issuer — there is nobody to link the
+        // first agent to. Register the key and say so, rather than naming a
+        // peer that does not exist.
+        if (invite.bootstrap) {
+          return done(201, {
+            bootstrap: true,
+            agent: {
+              fingerprint: caller.fingerprint,
+              label: key.label,
+              short: shortFingerprint(caller.fingerprint),
+            },
+          });
+        }
+
+        const link = registry.createLink({ a: caller.fingerprint, b: invite.issuer, via: invite.id });
+        const issuerKey = registry.getKey(invite.issuer);
+        return done(201, {
+          peer: {
+            fingerprint: invite.issuer,
+            label: issuerKey?.label ?? invite.issuer,
+            short: shortFingerprint(invite.issuer),
+          },
+          link: { created_at: link.created_at },
+        });
+      }
+
+      // ---- peers ----------------------------------------------------------
+      if (resource === 'peers' && method === 'GET' && !id) {
+        return done(200, {
+          agent: caller.fingerprint,
+          peers: registry.peersOf(caller.fingerprint).map((peer) => ({
+            ...peer,
+            short: shortFingerprint(peer.fingerprint),
+          })),
+        });
       }
 
       throw new StoreError('not_found', `no route for ${method} ${url.pathname}`, 404);

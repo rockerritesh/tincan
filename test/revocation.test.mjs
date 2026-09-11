@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startBroker, signedApi } from './helpers.mjs';
+import { startBroker, signedApi, signedUpload } from './helpers.mjs';
 import { fingerprintFromPublicKey } from '../shared/fingerprint.mjs';
 
 async function pairedPair(t) {
@@ -139,4 +139,141 @@ test('a malformed :fingerprint in the revoke path is a clean 400, not a crash', 
   const res = await signedApi(broker.baseUrl, alice, 'POST', '/v1/peers/not-a-fingerprint/revoke', {});
   assert.equal(res.status, 400);
   assert.equal(res.body.error, 'invalid_fingerprint');
+});
+
+// ---- fix round 1: four surfaces that skipped the revocation check ---------
+//
+// requireActiveLink guards the two create routes, assertReadable guards the
+// three singular reads, and isVisible guards the inbox. Everything else that
+// returns or mutates a shared record was left out. These four tests reproduce
+// each leak against the pre-fix code, then (once server/authz.mjs grows
+// `readableBetween` and the routes below are wired to it) confirm it is
+// closed — in both directions, so the revoker's own view is never collateral
+// damage.
+
+test('thread detail 404s for the revoked peer; the revoker still reads it, both directions', async (t) => {
+  const { broker, alice, bob } = await pairedPair(t);
+  const sent = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+    to: bob.fingerprint, subject: 'leak me not', body: 'x',
+  });
+  const threadId = sent.body.thread_id;
+
+  await signedApi(broker.baseUrl, alice, 'POST', `/v1/peers/${bob.fingerprint}/revoke`, {});
+
+  // bob is the revoked peer: he loses the thread, subjects and all.
+  const bobRead = await signedApi(broker.baseUrl, bob, 'GET', `/v1/threads/${threadId}`);
+  assert.equal(bobRead.status, 404);
+  assert.equal(bobRead.body.error, 'not_found');
+
+  // alice performed the revocation: her own copy of the conversation stands.
+  const aliceRead = await signedApi(broker.baseUrl, alice, 'GET', `/v1/threads/${threadId}`);
+  assert.equal(aliceRead.status, 200);
+  assert.ok(aliceRead.body.events.length >= 1);
+});
+
+test('threads list drops a thread for the revoked peer; the revoker still sees it', async (t) => {
+  const { broker, alice, bob } = await pairedPair(t);
+  await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+    to: bob.fingerprint, subject: 'metadata still counts', body: 'x',
+  });
+
+  await signedApi(broker.baseUrl, alice, 'POST', `/v1/peers/${bob.fingerprint}/revoke`, {});
+
+  const bobList = await signedApi(broker.baseUrl, bob, 'GET', '/v1/threads');
+  assert.equal(bobList.body.threads.length, 0, 'the revoked peer should not see the thread listed at all');
+
+  const aliceList = await signedApi(broker.baseUrl, alice, 'GET', '/v1/threads');
+  assert.equal(aliceList.body.threads.length, 1, "the revoker's own listing is unaffected");
+});
+
+test('offers list drops a pre-existing pending offer from the revoked peer; the revoker keeps theirs', async (t) => {
+  const { broker, alice, bob } = await pairedPair(t);
+
+  // One offer in each direction, both created while the link was still active.
+  const aliceToBob = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'alice->bob secret', size_bytes: 4,
+  });
+  const bobToAlice = await signedApi(broker.baseUrl, bob, 'POST', '/v1/offers', {
+    to: alice.fingerprint, subject: 'bob->alice secret', size_bytes: 4,
+  });
+
+  // bob revokes alice: bob is the revoker, alice is the revoked peer.
+  await signedApi(broker.baseUrl, bob, 'POST', `/v1/peers/${alice.fingerprint}/revoke`, {});
+
+  // alice is the revoked peer: the offer addressed to her disappears from her
+  // own incoming list.
+  const aliceOffers = await signedApi(broker.baseUrl, alice, 'GET', '/v1/offers');
+  assert.equal(
+    aliceOffers.body.incoming.some((o) => o.id === bobToAlice.body.id),
+    false,
+    'a revoked peer must not see a pre-existing offer addressed to them',
+  );
+
+  // bob is the revoker: the offer addressed to him is still listed.
+  const bobOffers = await signedApi(broker.baseUrl, bob, 'GET', '/v1/offers');
+  assert.ok(
+    bobOffers.body.incoming.some((o) => o.id === aliceToBob.body.id),
+    "the revoker's own incoming list is unaffected",
+  );
+});
+
+test('offers list also filters the answered view: a revoked peer loses their own accepted offer', async (t) => {
+  const { broker, alice, bob } = await pairedPair(t);
+
+  const offer = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'will be accepted', size_bytes: 4,
+  });
+  await signedApi(broker.baseUrl, bob, 'POST', `/v1/offers/${offer.body.id}/respond`, { accept: true });
+
+  // bob revokes alice: alice (the offer's sender) is the revoked peer here.
+  await signedApi(broker.baseUrl, bob, 'POST', `/v1/peers/${alice.fingerprint}/revoke`, {});
+
+  const aliceOffers = await signedApi(broker.baseUrl, alice, 'GET', '/v1/offers');
+  assert.equal(
+    aliceOffers.body.answered.some((o) => o.id === offer.body.id),
+    false,
+    'a revoked peer must not see their own answered offer in the list either',
+  );
+});
+
+test('offer respond, close and payload upload all require an active link, not just participancy', async (t) => {
+  const { broker, alice, bob } = await pairedPair(t);
+
+  // Sanity: prove the write routes work normally while the link is active,
+  // so the assertions below are about revocation, not a broken control.
+  const control = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'control', size_bytes: 4,
+  });
+  const controlRespond = await signedApi(
+    broker.baseUrl, bob, 'POST', `/v1/offers/${control.body.id}/respond`, { accept: true },
+  );
+  assert.equal(controlRespond.status, 200);
+
+  const offerRespond = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'to-respond', size_bytes: 4,
+  });
+  const offerClose = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'to-close', size_bytes: 4,
+  });
+  const offerPayload = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'to-upload', size_bytes: 4,
+  });
+
+  await signedApi(broker.baseUrl, alice, 'POST', `/v1/peers/${bob.fingerprint}/revoke`, {});
+
+  const respondRes = await signedApi(
+    broker.baseUrl, bob, 'POST', `/v1/offers/${offerRespond.body.id}/respond`, { accept: true },
+  );
+  assert.equal(respondRes.status, 403);
+  assert.equal(respondRes.body.error, 'no_link');
+
+  const closeRes = await signedApi(broker.baseUrl, alice, 'POST', `/v1/offers/${offerClose.body.id}/close`, {});
+  assert.equal(closeRes.status, 403);
+  assert.equal(closeRes.body.error, 'no_link');
+
+  const payloadRes = await signedUpload(
+    broker.baseUrl, alice, `/v1/offers/${offerPayload.body.id}/payload`, Buffer.from('data'), 'application/octet-stream',
+  );
+  assert.equal(payloadRes.status, 403);
+  assert.equal(payloadRes.body.error, 'no_link');
 });

@@ -71,6 +71,20 @@ export function assertTwoPartyThread(store, { caller, to, threadId, replyTo }) {
   if (!exact) throw refuse();
 }
 
+// True when `caller` may still read records shared with `other`. A revoked
+// peer loses access; whoever performed the revocation keeps their own copy —
+// otherwise disconnecting someone would erase your own view of the
+// conversation, which is the one thing this design promises never happens.
+// This is the single predicate every read surface (singular record, list, or
+// thread) should route through, so a surface added later inherits the
+// behaviour instead of repeating the leak.
+export function readableBetween(registry, caller, other) {
+  const link = registry.getLink(caller, other);
+  if (!link) return false;
+  if (link.status === 'revoked' && link.revoked_by !== caller) return false;
+  return true;
+}
+
 // A revoked peer keeps no read access to records you shared. Your own copy is
 // unaffected: skip the link check when the caller is the record's `from` (or
 // `to` — assertParticipant above already narrowed us to a participant) and
@@ -81,9 +95,7 @@ export function assertTwoPartyThread(store, { caller, to, threadId, replyTo }) {
 export function assertReadable(registry, record, fingerprint) {
   assertParticipant(record, fingerprint);
   const other = record.from === fingerprint ? record.to : record.from;
-  const link = registry.getLink(fingerprint, other);
-  if (!link) throw new StoreError('not_found', 'no such record', 404);
-  if (link.status === 'revoked' && link.revoked_by !== fingerprint) {
+  if (!readableBetween(registry, fingerprint, other)) {
     throw new StoreError('not_found', 'no such record', 404);
   }
   return record;

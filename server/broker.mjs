@@ -17,6 +17,7 @@ import { Registry } from './registry.mjs';
 import { createVerifier } from './verify.mjs';
 import {
   requireActiveLink, assertParticipant, assertReadable, assertTwoPartyThread, scopeThreads,
+  readableBetween,
 } from './authz.mjs';
 import { shortFingerprint } from '../shared/fingerprint.mjs';
 
@@ -198,10 +199,16 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         }));
       }
       if (resource === 'offers' && method === 'GET' && !id) {
+        // pendingOffersFor/answeredOffersBy filter on to/from + status only —
+        // a pre-existing offer would otherwise stay listed (subject and all)
+        // for a peer whose link has since been revoked. Filter through the
+        // same predicate the singular offer read already uses.
         return done(200, {
           agent: caller.fingerprint,
-          incoming: store.pendingOffersFor(caller.fingerprint),
-          answered: store.answeredOffersBy(caller.fingerprint),
+          incoming: store.pendingOffersFor(caller.fingerprint)
+            .filter((o) => readableBetween(registry, caller.fingerprint, o.from)),
+          answered: store.answeredOffersBy(caller.fingerprint)
+            .filter((o) => readableBetween(registry, caller.fingerprint, o.to)),
         });
       }
       if (resource === 'offers' && method === 'GET' && id && !action) {
@@ -209,7 +216,11 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
       }
       if (resource === 'offers' && method === 'POST' && id && action === 'respond') {
         const b = await jsonBody();
-        assertParticipant(store.getOffer(id), caller.fingerprint);
+        const offer = assertParticipant(store.getOffer(id), caller.fingerprint);
+        // Writes need a genuinely active link, not just "you may still read
+        // your own history" — the revoker does not get to keep transacting
+        // either. requireActiveLink, not readableBetween, on purpose.
+        requireActiveLink(registry, offer.from, offer.to);
         return done(200, store.respondOffer({
           agent: caller.fingerprint,
           offerId: id,
@@ -218,26 +229,40 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         }));
       }
       if (resource === 'offers' && method === 'PUT' && id && action === 'payload') {
-        assertParticipant(store.getOffer(id), caller.fingerprint);
+        const offer = assertParticipant(store.getOffer(id), caller.fingerprint);
+        requireActiveLink(registry, offer.from, offer.to);
         const buffer = await readBody(req, MAX_BLOB_BYTES);
         verifier.confirmBody(caller.claimedBodyHash, buffer);
-        const { offer, message } = store.attachPayload({ agent: caller.fingerprint, offerId: id, buffer });
-        return done(201, { offer, message });
+        const { offer: updated, message } = store.attachPayload({ agent: caller.fingerprint, offerId: id, buffer });
+        return done(201, { offer: updated, message });
       }
       if (resource === 'offers' && method === 'POST' && id && action === 'close') {
         await jsonBody();
-        assertParticipant(store.getOffer(id), caller.fingerprint);
+        const offer = assertParticipant(store.getOffer(id), caller.fingerprint);
+        requireActiveLink(registry, offer.from, offer.to);
         return done(200, store.closeOffer({ agent: caller.fingerprint, offerId: id }));
       }
 
       // ---- threads --------------------------------------------------------
       if (resource === 'threads' && method === 'GET' && !id) {
-        return done(200, { threads: scopeThreads(store.listThreads(null), caller.fingerprint) });
+        const scoped = scopeThreads(store.listThreads(null), caller.fingerprint);
+        const visible = scoped.filter((thread) => {
+          const other = thread.participants.find((p) => p !== caller.fingerprint);
+          return !other || readableBetween(registry, caller.fingerprint, other);
+        });
+        return done(200, { threads: visible });
       }
       if (resource === 'threads' && method === 'GET' && id) {
         const events = store.readThread(id);
         const participants = events[0]?.participants ?? [];
         if (!participants.includes(caller.fingerprint)) {
+          throw new StoreError('not_found', 'no such thread', 404);
+        }
+        // A revoked peer keeps no read access to a thread's history either —
+        // it carries subjects and byte counts, not just metadata. Same 404 a
+        // nonexistent thread gets, so this cannot become an existence oracle.
+        const other = participants.find((p) => p !== caller.fingerprint);
+        if (other && !readableBetween(registry, caller.fingerprint, other)) {
           throw new StoreError('not_found', 'no such thread', 404);
         }
         return done(200, { thread_id: id, events });

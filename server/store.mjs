@@ -173,7 +173,10 @@ export class Store {
   // Everything the recipient has not acked yet, oldest first. Fetching flips
   // queued -> delivered but leaves the inbox entry in place, so a crash between
   // fetch and ack redelivers rather than loses. Delivery is at-least-once.
-  inbox(agent) {
+  // The broker passes isVisible so revoked peers stop reaching this inbox. The
+  // message file and its thread events stay on disk — only the index entry is
+  // skipped, because a revoke is not an erasure.
+  inbox(agent, { isVisible = () => true } = {}) {
     safeId(agent, 'agent id');
     const dir = this.#inboxDir(agent);
     const messages = [];
@@ -183,6 +186,7 @@ export class Store {
         fs.rmSync(path.join(dir, entry), { force: true });
         continue;
       }
+      if (!isVisible(message)) continue;
       if (message.status === 'queued') {
         message.status = 'delivered';
         message.delivered_at = nowIso();

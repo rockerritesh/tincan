@@ -71,6 +71,24 @@ export function assertTwoPartyThread(store, { caller, to, threadId, replyTo }) {
   if (!exact) throw refuse();
 }
 
+// A revoked peer keeps no read access to records you shared. Your own copy is
+// unaffected: skip the link check when the caller is the record's `from` (or
+// `to` — assertParticipant above already narrowed us to a participant) and
+// *they themselves* performed the revocation. Only the revoked peer loses
+// access; the revoker does not — otherwise disconnecting someone would erase
+// your own view of the conversation, which is the one thing this design
+// promises never happens.
+export function assertReadable(registry, record, fingerprint) {
+  assertParticipant(record, fingerprint);
+  const other = record.from === fingerprint ? record.to : record.from;
+  const link = registry.getLink(fingerprint, other);
+  if (!link) throw new StoreError('not_found', 'no such record', 404);
+  if (link.status === 'revoked' && link.revoked_by !== fingerprint) {
+    throw new StoreError('not_found', 'no such record', 404);
+  }
+  return record;
+}
+
 export function scopeThreads(threads, fingerprint) {
   return threads.filter(
     (thread) => Array.isArray(thread.participants) && thread.participants.includes(fingerprint),

@@ -15,7 +15,9 @@ import { fileURLToPath } from 'node:url';
 import { Store, StoreError, MAX_INLINE_BYTES } from './store.mjs';
 import { Registry } from './registry.mjs';
 import { createVerifier } from './verify.mjs';
-import { requireActiveLink, assertParticipant, assertTwoPartyThread, scopeThreads } from './authz.mjs';
+import {
+  requireActiveLink, assertParticipant, assertReadable, assertTwoPartyThread, scopeThreads,
+} from './authz.mjs';
 import { shortFingerprint } from '../shared/fingerprint.mjs';
 
 const MAX_JSON_BYTES = 1 * 1024 * 1024;
@@ -147,7 +149,7 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         return done(201, message);
       }
       if (resource === 'messages' && method === 'GET' && id && !action) {
-        return done(200, assertParticipant(store.getMessage(id), caller.fingerprint));
+        return done(200, assertReadable(registry, store.getMessage(id), caller.fingerprint));
       }
       if (resource === 'messages' && method === 'POST' && id && action === 'ack') {
         await jsonBody();
@@ -155,7 +157,7 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         return done(200, store.ackRead(caller.fingerprint, message.id));
       }
       if (resource === 'messages' && method === 'GET' && id && action === 'payload') {
-        const message = assertParticipant(store.getMessage(id), caller.fingerprint);
+        const message = assertReadable(registry, store.getMessage(id), caller.fingerprint);
         const buffer = store.readBlob(message.id);
         verifier.commit(caller.nonce, caller.fingerprint);
         res.writeHead(200, {
@@ -167,7 +169,12 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
 
       // ---- inbox ----------------------------------------------------------
       if (resource === 'inbox' && method === 'GET') {
-        return done(200, { agent: caller.fingerprint, messages: store.inbox(caller.fingerprint) });
+        return done(200, {
+          agent: caller.fingerprint,
+          messages: store.inbox(caller.fingerprint, {
+            isVisible: (message) => registry.linkStatus(caller.fingerprint, message.from) === 'active',
+          }),
+        });
       }
 
       // ---- offers ---------------------------------------------------------
@@ -198,7 +205,7 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         });
       }
       if (resource === 'offers' && method === 'GET' && id && !action) {
-        return done(200, assertParticipant(store.getOffer(id), caller.fingerprint));
+        return done(200, assertReadable(registry, store.getOffer(id), caller.fingerprint));
       }
       if (resource === 'offers' && method === 'POST' && id && action === 'respond') {
         const b = await jsonBody();
@@ -321,6 +328,19 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
             ...peer,
             short: shortFingerprint(peer.fingerprint),
           })),
+        });
+      }
+      if (resource === 'peers' && method === 'POST' && id && action === 'revoke') {
+        await jsonBody();
+        // revokeLink throws no_link/404 when there was never a link, which is
+        // also what a stranger's fingerprint produces — nothing is disclosed.
+        // It also validates `id` as a fingerprint internally (requireFingerprint),
+        // so a malformed :fingerprint surfaces as a typed 400, not a native throw.
+        const link = registry.revokeLink({ a: caller.fingerprint, b: id, by: caller.fingerprint });
+        return done(200, {
+          fingerprint: id,
+          status: link.status,
+          revoked_at: link.revoked_at,
         });
       }
 

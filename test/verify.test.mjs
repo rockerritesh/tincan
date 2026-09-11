@@ -153,6 +153,62 @@ test('query parameters are covered by the signature', (t) => {
   assert.throws(() => verifier.verifyHeaders(swapped.req, swapped.url), (e) => e.code === 'bad_signature');
 });
 
+test('a public key that decodes to the wrong byte length is malformed, not a crash', (t) => {
+  const { identity, verifier } = harness();
+  t.after(() => verifier.stop());
+  for (const len of [16, 33]) {
+    const { req, url } = reqFor(identity);
+    req.headers[HEADERS.key] = Buffer.alloc(len, 7).toString('base64url');
+    assert.throws(
+      () => verifier.verifyHeaders(req, url),
+      (e) => e.code === 'malformed_signature' && e.status === 400,
+      `a ${len}-byte key should be malformed_signature/400, not an uncaught error`,
+    );
+  }
+});
+
+// Node's Ed25519 OKP import (this Node/OpenSSL build) accepts every 32-byte
+// value as a structurally valid public key — there is no curve-point check at
+// import time, so no real byte string reaches createPublicKey's catch clause.
+// That does not make the catch dead code: it exists to convert whatever
+// createPublicKey might reject — on this build, another, or a future one —
+// into a typed 400 rather than an uncaught 500. We prove the guard directly by
+// forcing the one call it wraps to throw, rather than relying on an input that
+// may not exist. crypto is the same 'node:crypto' module object verify.mjs
+// imports, so mocking a method here reaches its call there.
+test('a public key that fails import is malformed_signature, not an uncaught error', (t) => {
+  const { identity, verifier } = harness();
+  t.after(() => verifier.stop());
+  const { req, url } = reqFor(identity);
+  req.headers[HEADERS.key] = Buffer.alloc(32, 3).toString('base64url'); // right length, so it reaches createPublicKey
+  t.mock.method(crypto, 'createPublicKey', () => {
+    throw new Error('not a valid Ed25519 point');
+  });
+  assert.throws(
+    () => verifier.verifyHeaders(req, url),
+    (e) => e.code === 'malformed_signature' && e.status === 400,
+  );
+});
+
+test('a garbage or wrong-length signature is bad_signature, not a native crash', (t) => {
+  const { identity, verifier } = harness();
+  t.after(() => verifier.stop());
+  const garbageSignatures = [
+    Buffer.alloc(64, 0xff).toString('base64url'), // right length, wrong content
+    Buffer.alloc(3, 1).toString('base64url'), // far too short
+    Buffer.alloc(128, 2).toString('base64url'), // far too long
+  ];
+  for (const signature of garbageSignatures) {
+    const { req, url } = reqFor(identity);
+    req.headers[HEADERS.signature] = signature;
+    assert.throws(
+      () => verifier.verifyHeaders(req, url),
+      (e) => e.code === 'bad_signature' && e.status === 401,
+      `signature ${signature.slice(0, 8)}... should be bad_signature/401, not an uncaught error`,
+    );
+  }
+});
+
 test('confirmBody accepts the matching body', (t) => {
   const { identity, verifier } = harness();
   t.after(() => verifier.stop());

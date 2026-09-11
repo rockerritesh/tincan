@@ -30,5 +30,7 @@ export function visibleToCaller(record, fingerprint) {
 }
 
 export function scopeThreads(threads, fingerprint) {
-  return threads.filter((thread) => (thread.participants ?? []).includes(fingerprint));
+  return threads.filter(
+    (thread) => Array.isArray(thread.participants) && thread.participants.includes(fingerprint),
+  );
 }

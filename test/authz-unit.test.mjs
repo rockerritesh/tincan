@@ -57,3 +57,50 @@ test('thread scoping keeps only threads the caller participates in', () => {
   assert.deepEqual(scopeThreads(threads, a).map((t) => t.thread_id), ['t1', 't3']);
   assert.deepEqual(scopeThreads(threads, b).map((t) => t.thread_id), ['t1', 't2']);
 });
+
+test('scopeThreads requires participants to be an array, not a malformed object', () => {
+  // Omitted entirely — falls through correctly
+  const threads = [{ thread_id: 't1' }];
+  assert.deepEqual(scopeThreads(threads, a).map((t) => t.thread_id), []);
+});
+
+test('scopeThreads with participants as an object does not crash', () => {
+  // If participants is an object, Array.isArray catches it before calling .includes
+  const threads = [{ thread_id: 't1', participants: { [a]: true } }];
+  assert.deepEqual(scopeThreads(threads, a).map((t) => t.thread_id), []);
+});
+
+test('scopeThreads with participants as a string excludes substring false-positives', () => {
+  // This is the security case: a string containing the fingerprint as a substring
+  // must not authorize access. The current code incorrectly uses String.prototype.includes
+  // and would return the thread (false-positive). After the fix, Array.isArray rejects it.
+  const threads = [{ thread_id: 't1', participants: `someprefix${a}somesuffix` }];
+  assert.deepEqual(scopeThreads(threads, a).map((t) => t.thread_id), [], 'substring match must not authorize');
+});
+
+test('the two 404 errors (null record vs. non-participant) are indistinguishable', () => {
+  // This guards against a future refactor that splits the throw into two statements.
+  // If someone "improves" the error messages, this test fails, preventing the security
+  // guarantee from breaking.
+  const record = { id: 'msg_1', from: b, to: c };
+  let nullError;
+  let nonParticipantError;
+
+  try {
+    assertParticipant(null, a);
+  } catch (e) {
+    nullError = e;
+  }
+
+  try {
+    assertParticipant(record, a);
+  } catch (e) {
+    nonParticipantError = e;
+  }
+
+  assert.ok(nullError, 'null record must throw');
+  assert.ok(nonParticipantError, 'non-participant record must throw');
+  assert.equal(nullError.code, nonParticipantError.code, 'error codes must match');
+  assert.equal(nullError.status, nonParticipantError.status, 'error statuses must match');
+  assert.equal(nullError.message, nonParticipantError.message, 'error messages must be identical (prevents future divergence)');
+});

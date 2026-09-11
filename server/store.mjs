@@ -7,7 +7,6 @@
 //   offers/<offer_id>.json       large-payload handshake records
 //   blobs/<message_id>           raw payload for large messages
 //   threads/<thread_id>.jsonl    append-only event log, first line is thread.created
-//   agents/<agent_id>.json       last-seen bookkeeping
 //
 // The broker is a single process, so it is the only writer. That makes
 // write-tmp-then-rename sufficient for atomicity; readers never see a half file.
@@ -55,7 +54,6 @@ export class Store {
       offers: path.join(this.root, 'offers'),
       blobs: path.join(this.root, 'blobs'),
       threads: path.join(this.root, 'threads'),
-      agents: path.join(this.root, 'agents'),
     };
     for (const dir of Object.values(this.dirs)) fs.mkdirSync(dir, { recursive: true });
   }
@@ -98,30 +96,6 @@ export class Store {
     const dir = path.join(this.dirs.inbox, safeId(agent, 'agent id'));
     fs.mkdirSync(dir, { recursive: true });
     return dir;
-  }
-
-  // ---- agents -------------------------------------------------------------
-
-  heartbeat(agent) {
-    safeId(agent, 'agent id');
-    const file = path.join(this.dirs.agents, `${agent}.json`);
-    const existing = this.#readJson(file);
-    const record = {
-      agent_id: agent,
-      first_seen: existing?.first_seen ?? nowIso(),
-      last_seen: nowIso(),
-    };
-    this.#writeJson(file, record);
-    return record;
-  }
-
-  listAgents() {
-    return fs
-      .readdirSync(this.dirs.agents)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => this.#readJson(path.join(this.dirs.agents, f)))
-      .filter(Boolean)
-      .sort((a, b) => a.agent_id.localeCompare(b.agent_id));
   }
 
   // ---- messages -----------------------------------------------------------
@@ -183,7 +157,6 @@ export class Store {
       inline: body !== null,
       bytes: blob ? blob.size : Buffer.byteLength(body ?? '', 'utf8'),
     });
-    this.heartbeat(from);
     return message;
   }
 
@@ -202,7 +175,6 @@ export class Store {
   // fetch and ack redelivers rather than loses. Delivery is at-least-once.
   inbox(agent) {
     safeId(agent, 'agent id');
-    this.heartbeat(agent);
     const dir = this.#inboxDir(agent);
     const messages = [];
     for (const entry of fs.readdirSync(dir).sort()) {
@@ -299,7 +271,6 @@ export class Store {
       subject,
       size_bytes: sizeBytes,
     });
-    this.heartbeat(from);
     return offer;
   }
 
@@ -357,7 +328,6 @@ export class Store {
       by: agent,
       reason,
     });
-    this.heartbeat(agent);
     return offer;
   }
 
@@ -429,7 +399,7 @@ export class Store {
   readThread(threadId) {
     safeId(threadId, 'thread id');
     const file = path.join(this.dirs.threads, `${threadId}.jsonl`);
-    if (!fs.existsSync(file)) throw new StoreError('unknown_thread', `thread ${threadId} not found`, 404);
+    if (!fs.existsSync(file)) throw new StoreError('not_found', 'no such thread', 404);
     return fs
       .readFileSync(file, 'utf8')
       .split('\n')

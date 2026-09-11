@@ -10,6 +10,12 @@ import { tempDir } from './helpers.mjs';
 
 test('first run generates a keypair and persists it locked down', () => {
   const home = tempDir('identity');
+  // Widen the directory to prove loadOrCreateIdentity tightens it back to 0o700.
+  // If this assertion could pass without the chmod in mcp/identity.mjs, the test
+  // gives false confidence about the highest-consequence security setting.
+  fs.chmodSync(home, 0o755);
+  assert.equal(fs.statSync(home).mode & 0o777, 0o755, 'precondition: directory widened');
+
   const id = loadOrCreateIdentity({ home, label: 'test-machine' });
 
   assert.ok(isFingerprint(id.fingerprint));
@@ -19,7 +25,7 @@ test('first run generates a keypair and persists it locked down', () => {
   const file = path.join(home, 'identity.json');
   assert.ok(fs.existsSync(file));
   assert.equal(fs.statSync(file).mode & 0o777, 0o600, 'private key must not be group/world readable');
-  assert.equal(fs.statSync(home).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(home).mode & 0o777, 0o700, 'directory must be tightened by loadOrCreateIdentity');
 
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(saved.version, 1);

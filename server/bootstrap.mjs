@@ -25,6 +25,12 @@ function arg(name, fallback) {
 }
 
 const dataDir = path.resolve(arg('data-dir', process.env.DATA_DIR ?? path.join(process.cwd(), 'data')));
+// --label is a note-to-self on this output only. A bootstrap invite carries no
+// issuer and no intended recipient, and the label that actually lands in the
+// registry is the one the redeemer sends with POST /v1/invites/redeem. Keeping
+// the flag (rather than dropping it) is what lets an installer that mints
+// several codes tell its own output apart; the printed line says so plainly so
+// nobody reads it as "this code only works for that agent".
 const label = arg('label', 'owner');
 const ttlMinutes = Number(arg('ttl-minutes', '60'));
 
@@ -35,9 +41,12 @@ const { invite, code } = registry.createInvite({
   ttlMs: ttlMinutes * 60 * 1000,
 });
 
-console.log(`tincan bootstrap invite for "${label}"`);
+console.log(`tincan bootstrap invite — your note: "${label}"`);
 console.log(`data dir : ${registry.root}`);
 console.log(`expires  : ${invite.expires_at}`);
+console.log('');
+console.log('Note: --label only labels this printout. The code is not bound to any agent,');
+console.log('and the label recorded in the registry is the one the redeemer sends.');
 console.log('');
 console.log('Redeem it on the machine that will own this broker, then delete this output.');
 console.log('');

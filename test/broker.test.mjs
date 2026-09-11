@@ -3,6 +3,7 @@ import http from 'node:http';
 import assert from 'node:assert/strict';
 import { startBroker, signedApi, signedUpload } from './helpers.mjs';
 import { signedHeaders } from '../mcp/identity.mjs';
+import { MAX_INLINE_BYTES } from '../shared/limits.mjs';
 
 test('the signed HTTP surface', async (t) => {
   const broker = await startBroker();
@@ -413,5 +414,107 @@ test('the BROKER_TOKEN gate sits in front of signature verification', async (t) 
     const res = await signedApi(broker.baseUrl, null, 'GET', '/v1/inbox');
     assert.equal(res.status, 401);
     assert.equal(res.body.error, 'unauthorized');
+  });
+});
+
+// Task 7's rewrite of this file dropped the only coverage of three input
+// validation paths — missing_subject (400), payload_too_large (413) and
+// invalid_json (400). Validation with no test can be refactored away in
+// silence, and the 413 in particular is the only thing standing between a
+// 64KB inline limit and the offer flow existing at all. Restored here.
+test('input validation on the signed surface', async (t) => {
+  const broker = await startBroker();
+  t.after(() => broker.stop());
+  const alice = broker.identity('alice');
+  const bob = broker.identity('bob');
+  broker.link(alice, bob);
+
+  // Signs whatever raw bytes are given and puts exactly those on the wire, so
+  // a body that is NOT valid JSON still satisfies the signed body hash. Since
+  // Task 5 the two are checked independently — the signature covers a hash in
+  // its own header, and confirmBody compares it to what arrived — so a
+  // malformed body can no longer be smuggled past the signature, nor can it
+  // be reached by accident. It has to be constructed deliberately.
+  const signedRaw = async (identity, method, pathname, raw) => {
+    const headers = {
+      'content-type': 'application/json',
+      ...signedHeaders(identity, {
+        method,
+        pathname,
+        searchParams: new URLSearchParams(),
+        body: raw,
+      }),
+    };
+    const res = await fetch(`${broker.baseUrl}${pathname}`, { method, headers, body: raw });
+    return { status: res.status, body: await res.json() };
+  };
+
+  await t.test('a message with no subject is refused', async () => {
+    for (const subject of [undefined, '', '   ']) {
+      const res = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+        to: bob.fingerprint, subject, body: 'x',
+      });
+      assert.equal(res.status, 400, `subject ${JSON.stringify(subject)} must be refused`);
+      assert.equal(res.body.error, 'missing_subject');
+    }
+  });
+
+  await t.test('an offer with no subject is refused the same way', async () => {
+    const res = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+      to: bob.fingerprint, size_bytes: 16,
+    });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'missing_subject');
+  });
+
+  await t.test('an inline body over the limit is 413 and names the offer flow', async () => {
+    // Comfortably over MAX_INLINE_BYTES (64KB) and comfortably under the
+    // route's 1MB JSON cap, so this is the store's limit answering, not
+    // readBody's — those are two different 413s and only one of them tells
+    // the client what to do instead.
+    const res = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+      to: bob.fingerprint, subject: 'too big', body: 'x'.repeat(MAX_INLINE_BYTES + 1),
+    });
+    assert.equal(res.status, 413);
+    assert.equal(res.body.error, 'payload_too_large');
+    assert.match(res.body.message, /offer flow/i, 'the error must point at the way through');
+  });
+
+  // readBody's own 1MB JSON cap is deliberately NOT asserted here. It raises
+  // the same payload_too_large, but it also calls req.destroy() to stop
+  // reading, which tears the socket down before the 413 can be written — the
+  // client sees a connection error instead of the status. That is pre-existing
+  // 0.1.x behaviour (unchanged since the first commit), it fails closed, and
+  // changing it means reworking how an oversized upload is cut off. Noted
+  // rather than papered over with a test that asserts the connection error.
+
+  await t.test('a signed but unparseable body is invalid_json, not a 500', async () => {
+    const res = await signedRaw(alice, 'POST', '/v1/messages', '{"to": ');
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error, 'invalid_json');
+    assert.match(res.body.message, /could not parse/i);
+  });
+
+  await t.test('valid JSON that is not an object is also invalid_json', async () => {
+    // The other branch: JSON.parse succeeds, but an array or a scalar has no
+    // fields to read, and indexing one would silently behave as an empty body.
+    for (const raw of ['[]', '"a string"', '42', 'null', 'true']) {
+      const res = await signedRaw(alice, 'POST', '/v1/messages', raw);
+      assert.equal(res.status, 400, `${raw} must be refused`);
+      assert.equal(res.body.error, 'invalid_json');
+      assert.equal(res.body.message, 'body must be a JSON object');
+    }
+  });
+
+  await t.test('an empty body is still fine — every no-body route sends one', async () => {
+    // The boundary the two tests above must not swallow: ack and revoke sign
+    // an empty body, and jsonBody() returns {} for it rather than failing to
+    // parse zero bytes.
+    const sent = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+      to: bob.fingerprint, subject: 'ackable', body: 'x',
+    });
+    const res = await signedApi(broker.baseUrl, bob, 'POST', `/v1/messages/${sent.body.id}/ack`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, 'read');
   });
 });

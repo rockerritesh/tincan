@@ -1,5 +1,7 @@
 // Thin HTTP client for the broker. One place that knows the wire format.
 
+import { signedHeaders } from './identity.mjs';
+
 export class BrokerError extends Error {
   constructor(status, code, message) {
     super(`${code}: ${message}`);
@@ -9,17 +11,21 @@ export class BrokerError extends Error {
 }
 
 export class BrokerClient {
-  constructor({ baseUrl, agentId, token = null, timeoutMs = 20000 }) {
+  constructor({ baseUrl, identity, token = null, timeoutMs = 20000 }) {
+    if (!identity) throw new Error('BrokerClient needs an identity to sign with');
     this.baseUrl = baseUrl.replace(/\/+$/, '');
-    this.agentId = agentId;
+    this.identity = identity;
+    this.agentId = identity.fingerprint; // convenience for callers and logs
     this.token = token;
     this.timeoutMs = timeoutMs;
   }
 
+  // Every request is signed here, so no call site can forget.
   async #request(method, pathname, { body, raw, contentType } = {}) {
+    const url = new URL(`${this.baseUrl}${pathname}`);
     const headers = {};
-    if (this.token) headers.authorization = `Bearer ${this.token}`;
     let payload;
+
     if (raw !== undefined) {
       payload = raw;
       headers['content-type'] = contentType ?? 'application/octet-stream';
@@ -28,9 +34,17 @@ export class BrokerClient {
       headers['content-type'] = 'application/json';
     }
 
+    if (this.token) headers.authorization = `Bearer ${this.token}`;
+    Object.assign(headers, signedHeaders(this.identity, {
+      method,
+      pathname: url.pathname,
+      searchParams: url.searchParams,
+      body: payload,
+    }));
+
     let res;
     try {
-      res = await fetch(`${this.baseUrl}${pathname}`, {
+      res = await fetch(url, {
         method,
         headers,
         body: payload,
@@ -53,21 +67,10 @@ export class BrokerClient {
     return this.#request('GET', '/v1/health');
   }
 
-  heartbeat() {
-    return this.#request('POST', '/v1/agents/heartbeat', { body: { agent: this.agentId } });
-  }
-
-  listAgents() {
-    return this.#request('GET', '/v1/agents');
-  }
-
   sendMessage({ to, subject, body, contentType, threadId, replyTo }) {
     return this.#request('POST', '/v1/messages', {
       body: {
-        from: this.agentId,
-        to,
-        subject,
-        body,
+        to, subject, body,
         content_type: contentType,
         thread_id: threadId,
         reply_to: replyTo,
@@ -80,9 +83,7 @@ export class BrokerClient {
   }
 
   ackMessage(id) {
-    return this.#request('POST', `/v1/messages/${encodeURIComponent(id)}/ack`, {
-      body: { agent: this.agentId },
-    });
+    return this.#request('POST', `/v1/messages/${encodeURIComponent(id)}/ack`, { body: {} });
   }
 
   getPayload(id) {
@@ -90,15 +91,13 @@ export class BrokerClient {
   }
 
   inbox() {
-    return this.#request('GET', `/v1/inbox?agent=${encodeURIComponent(this.agentId)}`);
+    return this.#request('GET', '/v1/inbox');
   }
 
   createOffer({ to, subject, sizeBytes, contentType, threadId, replyTo }) {
     return this.#request('POST', '/v1/offers', {
       body: {
-        from: this.agentId,
-        to,
-        subject,
+        to, subject,
         size_bytes: sizeBytes,
         content_type: contentType,
         thread_id: threadId,
@@ -108,34 +107,47 @@ export class BrokerClient {
   }
 
   offers() {
-    return this.#request('GET', `/v1/offers?agent=${encodeURIComponent(this.agentId)}`);
+    return this.#request('GET', '/v1/offers');
   }
 
   respondOffer({ offerId, accept, reason }) {
     return this.#request('POST', `/v1/offers/${encodeURIComponent(offerId)}/respond`, {
-      body: { agent: this.agentId, accept, reason },
+      body: { accept, reason },
     });
   }
 
   uploadOffer({ offerId, buffer, contentType }) {
-    return this.#request(
-      'PUT',
-      `/v1/offers/${encodeURIComponent(offerId)}/payload?agent=${encodeURIComponent(this.agentId)}`,
-      { raw: buffer, contentType },
-    );
-  }
-
-  closeOffer(offerId) {
-    return this.#request('POST', `/v1/offers/${encodeURIComponent(offerId)}/close`, {
-      body: { agent: this.agentId },
+    return this.#request('PUT', `/v1/offers/${encodeURIComponent(offerId)}/payload`, {
+      raw: buffer,
+      contentType,
     });
   }
 
+  closeOffer(offerId) {
+    return this.#request('POST', `/v1/offers/${encodeURIComponent(offerId)}/close`, { body: {} });
+  }
+
   listThreads() {
-    return this.#request('GET', `/v1/threads?agent=${encodeURIComponent(this.agentId)}`);
+    return this.#request('GET', '/v1/threads');
   }
 
   readThread(threadId) {
     return this.#request('GET', `/v1/threads/${encodeURIComponent(threadId)}`);
+  }
+
+  createInvite({ ttlMs } = {}) {
+    return this.#request('POST', '/v1/invites', { body: ttlMs ? { ttl_ms: ttlMs } : {} });
+  }
+
+  redeemInvite({ code, label }) {
+    return this.#request('POST', '/v1/invites/redeem', { body: { code, label } });
+  }
+
+  peers() {
+    return this.#request('GET', '/v1/peers');
+  }
+
+  revokePeer(fingerprint) {
+    return this.#request('POST', `/v1/peers/${encodeURIComponent(fingerprint)}/revoke`, { body: {} });
   }
 }

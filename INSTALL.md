@@ -105,7 +105,10 @@ npm install
 
 ### Register an agent
 
-**`AGENT_LABEL` is the per-machine name.** There is no shared secret to copy.
+**`AGENT_LABEL` is the per-machine name.** There is no shared secret to copy —
+add `--env BROKER_TOKEN=<token>` only if this broker's deployer set one.
+`deploy/install.sh` always generates one, so a broker installed that way needs
+it; a bare `npm run broker` on a laptop usually does not.
 
 ```bash
 claude mcp add tincan --scope user \
@@ -113,6 +116,10 @@ claude mcp add tincan --scope user \
   --env BROKER_URL=https://your-broker-url \
   -- node ~/tincan/mcp/server.mjs
 ```
+
+If the broker requires a token, add `--env BROKER_TOKEN=<token>` to the
+command above — without it every call fails with `401` before your signature
+is even checked.
 
 `--scope user` makes the agent available in every project on that machine,
 which is usually what you want since the label names the *machine*. Use an
@@ -138,9 +145,11 @@ An agent only notices incoming messages when it looks. In Claude Code:
 /loop 30s call check_inbox and handle anything it returns
 ```
 
-One `check_inbox` call does three things: returns new messages, surfaces
-transfer offers waiting on a decision, and completes offers this agent sent that
-have since been answered. `quiet: true` means there was nothing to do.
+One `check_inbox` call does four things: returns new messages, surfaces
+transfer offers waiting on a decision, completes offers this agent sent that
+have since been answered, and reports `peer_events` — peers that just
+connected and peers that were revoked. `quiet: true` means there was nothing
+to do.
 
 ---
 
@@ -162,6 +171,7 @@ have since been answered. `quiet: true` means there was nothing to do.
 |---|---|---|
 | `AGENT_LABEL` | *(required)* | This machine's name. Its identity is its keypair, not this. |
 | `BROKER_URL` | `http://127.0.0.1:8787` | Where the broker is. |
+| `BROKER_TOKEN` | *(unset)* | Optional, but required if the broker has one set — `deploy/install.sh` always sets one. Not identity. |
 | `TINCAN_HOME` | `~/.tincan` | Keypair, peer book, outbox and downloads. |
 
 `AGENT_ID` is still accepted as a silent fallback for `AGENT_LABEL`, so a
@@ -247,6 +257,12 @@ the upgrade note in [README.md](README.md#deploying-the-broker-to-a-server).
 `deploy/push.sh` does not check the data layout before it ships, so this is a
 deliberate step, not something the deploy scripts do for you.
 
+> **Before you run it:** on first run, `deploy/install.sh` also mints the
+> owner's bootstrap invite and prints the code to its own stdout — once, with
+> no redirection of its own. If you pipe or log this command's output
+> (`| tee`, a CI job, and similar), that log now holds a live invite code. Run
+> it interactively and redeem the code promptly instead.
+
 ```bash
 BROKER_TOKEN=$(openssl rand -hex 32) bash deploy/install.sh
 ```
@@ -263,12 +279,6 @@ systemctl status agent-tunnel-broker agent-tunnel-cloudflared
 ```bash
 agent-tunnel-url
 ```
-
-On first run, `deploy/install.sh` also mints the owner's bootstrap invite and
-prints the code to its own stdout — once, with no redirection of its own. If
-you pipe or log this command's output (`| tee`, a CI job, and similar), that
-log now holds a live invite code. Run it interactively and redeem the code
-promptly instead.
 
 ---
 

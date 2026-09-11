@@ -228,7 +228,7 @@ const TOOLS = [
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 
 const server = new Server(
-  { name: 'tincan', version: '0.1.0' },
+  { name: 'tincan', version: '0.2.0' },
   { capabilities: { tools: {} } },
 );
 

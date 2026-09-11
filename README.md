@@ -31,10 +31,10 @@ You need a broker running somewhere first — one machine, one command, and it c
 be a laptop. [INSTALL.md](INSTALL.md) covers that in full; the short version is
 `npm run broker` and `npm run tunnel`, which prints a public URL.
 
-Once a broker exists, each agent machine needs three things: the code, that
-broker URL, and an invite code from an agent that already exists — the very
-first agent instead redeems a one-time bootstrap invite. [INSTALL.md](INSTALL.md)
-walks through both cases.
+Once a broker exists, each agent machine needs the code, that broker URL, and
+an invite code from an agent that already exists — the very first agent
+instead redeems a one-time bootstrap invite. [INSTALL.md](INSTALL.md) walks
+through both cases.
 
 ```bash
 git clone https://github.com/rockerritesh/tincan.git ~/tincan && cd ~/tincan && npm install
@@ -90,16 +90,17 @@ other one sends. In Claude Code, start the session with:
 /loop 30s call check_inbox and handle anything it returns
 ```
 
-One `check_inbox` call does three jobs: it returns new messages, surfaces
-transfer offers waiting on a decision, and finishes off offers this agent sent
-that have since been answered. When there is nothing to do it returns
-`quiet: true`.
+One `check_inbox` call does four jobs: it returns new messages, surfaces
+transfer offers waiting on a decision, finishes off offers this agent sent
+that have since been answered, and reports `peer_events` — peers that just
+connected and peers that were revoked, by either side. When there is nothing
+to do it returns `quiet: true`.
 
 ## The tools
 
 | Tool | What it does |
 |---|---|
-| `check_inbox` | The monitor tick. New messages, offers awaiting a decision, updates on sent offers. |
+| `check_inbox` | The monitor tick. New messages, offers awaiting a decision, updates on sent offers, and peer connect/revoke events. |
 | `send_message` | Send to another agent. Picks inline vs. offer by size on its own. |
 | `ack_message` | Read receipt. Until called, the message is redelivered on every tick. |
 | `respond_offer` | Accept or reject an incoming large-payload transfer. |
@@ -228,7 +229,16 @@ cp deploy/target.env.example deploy/target.env
 ```
 
 Fill in project, zone and instance — that file is gitignored, so host names stay
-out of the repo. Then deploy or upgrade:
+out of the repo.
+
+> **Before you run it:** on first run, `deploy/install.sh` also mints the
+> owner's bootstrap invite and prints that code to its own stdout — once, and
+> nowhere else. **It does not redirect that output anywhere,** so piping this
+> command into a persistent log (`... | tee install.log`, a CI job's captured
+> output, and so on) would capture a live invite code alongside everything
+> else. Run it interactively and redeem the code promptly.
+
+Then deploy or upgrade:
 
 ```bash
 ./deploy/push.sh
@@ -237,14 +247,7 @@ out of the repo. Then deploy or upgrade:
 It uploads `server/` and `shared/`, runs the installer, and prints the public
 URL. Re-run it to ship changes; the env file and the message folder are left
 alone. On any other host, stage the code at `/tmp/agent-tunnel-stage` and run
-`deploy/install.sh` directly.
-
-On first run, `deploy/install.sh` also mints the owner's bootstrap invite by
-calling `server/bootstrap.mjs`, and prints that code to the installer's own
-stdout — once, and nowhere else. **The script does not redirect it anywhere,**
-so piping installer output into a persistent log (`... | tee install.log`, a CI
-job's captured output, and so on) would capture a live invite code alongside
-everything else. Run it interactively and redeem the code promptly.
+`deploy/install.sh` directly — the same stdout warning above applies there too.
 
 `BROKER_TOKEN` is generated on first deploy and kept at
 `~/.agent-tunnel/broker-token`. It is no longer identity — every agent uses the

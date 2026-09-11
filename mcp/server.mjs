@@ -1,23 +1,29 @@
 #!/usr/bin/env node
-// MCP stdio server. Identical on both machines; only AGENT_ID and BROKER_URL
-// differ. Uses the low-level SDK Server with plain JSON Schema so the tool
-// surface does not depend on a validator version.
+// MCP stdio server. Identical on both machines; only AGENT_LABEL and
+// BROKER_URL differ. Uses the low-level SDK Server with plain JSON Schema so
+// the tool surface does not depend on a validator version.
+//
+// The label is a display name, not a credential: this agent's identity is the
+// keypair under its home directory, and the broker derives who is calling from
+// the signature on every request.
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { AgentLink } from './agent.mjs';
 
-const AGENT_ID = process.env.AGENT_ID;
+// AGENT_ID is still accepted so an existing registration keeps working, but
+// AGENT_LABEL is the name and the one the error message teaches.
+const AGENT_LABEL = process.env.AGENT_LABEL ?? process.env.AGENT_ID;
 const BROKER_URL = process.env.BROKER_URL ?? 'http://127.0.0.1:8787';
 const BROKER_TOKEN = process.env.BROKER_TOKEN ?? null;
 
-if (!AGENT_ID) {
-  console.error('tincan: AGENT_ID env var is required (e.g. AGENT_ID=alice)');
+if (!AGENT_LABEL) {
+  console.error('tincan: AGENT_LABEL env var is required (e.g. AGENT_LABEL=my-laptop)');
   process.exit(1);
 }
 
-const link = new AgentLink({ baseUrl: BROKER_URL, agentId: AGENT_ID, token: BROKER_TOKEN });
+const link = new AgentLink({ baseUrl: BROKER_URL, label: AGENT_LABEL, token: BROKER_TOKEN });
 
 const TOOLS = [
   {
@@ -37,7 +43,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        to: { type: 'string', description: 'Recipient agent id, e.g. "bob".' },
+        to: { type: 'string', description: 'Recipient alias from list_peers, e.g. "bob".' },
         subject: { type: 'string', description: 'Short one-line summary of what this message is.' },
         body: { type: 'string', description: 'Message content.' },
         content_type: { type: 'string', description: 'MIME type of the body. Defaults to text/plain.' },
@@ -134,16 +140,83 @@ const TOOLS = [
     handler: (a) => link.readThread(a.thread_id),
   },
   {
-    name: 'list_agents',
-    description: 'List agents known to the broker and when each was last seen.',
+    name: 'broker_health',
+    description:
+      "Confirm the broker is reachable and report this agent's identity, the broker URL, and its version.",
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    handler: () => link.listAgents(),
+    handler: () => link.identity(),
   },
   {
-    name: 'broker_health',
-    description: 'Confirm the broker is reachable and report this agent id, the broker URL, and its auth mode.',
+    name: 'my_identity',
+    description:
+      "This agent's cryptographic identity: its label, its full fingerprint, and the short form to read "
+      + 'aloud so a peer can verify you. Also reports whether the broker is reachable.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    handler: () => link.hello(),
+    handler: () => link.identity(),
+  },
+  {
+    name: 'create_invite',
+    description:
+      'Mint a single-use code that lets one other agent connect to this one. Send it over a channel you '
+      + 'already trust. The code is shown once and cannot be recovered; it expires in 15 minutes by default.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ttl_minutes: { type: 'integer', description: 'Minutes until the code expires. Defaults to 15.' },
+      },
+      additionalProperties: false,
+    },
+    handler: (a) => link.createInvite({ ttlMinutes: a.ttl_minutes }),
+  },
+  {
+    name: 'redeem_invite',
+    description:
+      'Connect to another agent using a code they gave you. Works even though this agent is unknown to '
+      + 'their broker — the code is the introduction.',
+    inputSchema: {
+      type: 'object',
+      properties: { code: { type: 'string', description: 'The invite code, dashes optional.' } },
+      required: ['code'],
+      additionalProperties: false,
+    },
+    handler: (a) => link.redeemInvite({ code: a.code }),
+  },
+  {
+    name: 'list_peers',
+    description:
+      'Agents this one is connected to: local alias, short fingerprint, whether it has been verified out '
+      + 'of band, and whether the connection is active or revoked.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    handler: () => link.listPeers(),
+  },
+  {
+    name: 'verify_peer',
+    description:
+      "Confirm a peer's identity by comparing the short fingerprint they read to you over a separate "
+      + 'channel. Protects against a substituted key at pairing time. Refuses on a mismatch.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        alias: { type: 'string' },
+        fingerprint: { type: 'string', description: 'The short form they gave you, e.g. 4K7M-2XQ9-VB3N.' },
+      },
+      required: ['alias', 'fingerprint'],
+      additionalProperties: false,
+    },
+    handler: (a) => link.verifyPeer({ alias: a.alias, fingerprint: a.fingerprint }),
+  },
+  {
+    name: 'disconnect_peer',
+    description:
+      'Revoke a connection. Blocks messages in both directions immediately. Your copy of the existing '
+      + 'conversation history is kept and stays readable.',
+    inputSchema: {
+      type: 'object',
+      properties: { alias: { type: 'string' } },
+      required: ['alias'],
+      additionalProperties: false,
+    },
+    handler: (a) => link.disconnectPeer({ alias: a.alias }),
   },
 ];
 
@@ -175,4 +248,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 await server.connect(new StdioServerTransport());
-console.error(`tincan: ${AGENT_ID} connected to ${BROKER_URL}`);
+console.error(`tincan: ${AGENT_LABEL} (${link.identityRecord.short}) connected to ${BROKER_URL}`);

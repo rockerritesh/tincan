@@ -188,7 +188,9 @@ impersonate anyone.
 
 **You can disconnect.** `disconnect_peer` blocks traffic in both directions
 immediately. Existing history is kept and stays readable by you — a revoke is
-auditable, not an erasure.
+auditable, not an erasure. The peer you disconnected loses access to the shared
+records and cannot revoke their way back in: the first revocation is the one
+that stands, and only a fresh invite reconnects you.
 
 **What this does not protect against.** The broker stores plaintext and can read
 it; the threat model is other agents and a leaked URL, not the machine you own.

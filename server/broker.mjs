@@ -16,8 +16,8 @@ import { Store, StoreError, MAX_INLINE_BYTES } from './store.mjs';
 import { Registry } from './registry.mjs';
 import { createVerifier } from './verify.mjs';
 import {
-  requireActiveLink, assertParticipant, assertReadable, assertTwoPartyThread, scopeThreads,
-  readableBetween,
+  requireActiveLink, assertParticipantIgnoringLink, assertReadable, assertReadableThread,
+  assertTwoPartyThread, scopeThreads, readableBetween, threadReadableBy,
 } from './authz.mjs';
 import { shortFingerprint } from '../shared/fingerprint.mjs';
 
@@ -128,6 +128,16 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         return send(res, status, payload);
       };
 
+      // Same helper, same commit-then-respond order, for the one route whose
+      // response is raw bytes rather than JSON. A sibling rather than an
+      // inline commit() so the nonce is spent in exactly one place per
+      // response shape, and no route has to remember to do it by hand.
+      const doneRaw = (status, headers, buffer) => {
+        verifier.commit(caller.nonce, caller.fingerprint);
+        res.writeHead(status, headers);
+        return res.end(buffer);
+      };
+
       // ---- messages -------------------------------------------------------
       if (resource === 'messages' && method === 'POST' && !id) {
         const b = await jsonBody();
@@ -154,24 +164,41 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
       }
       if (resource === 'messages' && method === 'POST' && id && action === 'ack') {
         await jsonBody();
-        const message = assertParticipant(store.getMessage(id), caller.fingerprint);
+        // assertReadable, not a bare participancy check: ackRead returns the
+        // complete message record, `body` included, so this is a read surface
+        // wearing a write route's clothes. With only participancy checked, a
+        // revoked peer could fetch through the ack door the very record
+        // GET /v1/messages/:id correctly 404s them — and flip its status and
+        // append a message.read event to the revoker's thread log on the way
+        // out. The revoker keeps their own ack; the revoked peer gets the same
+        // 404 the read path gives.
+        //
+        // A sender acking is still ackRead's own 403 (not_recipient), which
+        // discloses nothing a sender does not already know.
+        const message = assertReadable(registry, store.getMessage(id), caller.fingerprint);
         return done(200, store.ackRead(caller.fingerprint, message.id));
       }
       if (resource === 'messages' && method === 'GET' && id && action === 'payload') {
         const message = assertReadable(registry, store.getMessage(id), caller.fingerprint);
         const buffer = store.readBlob(message.id);
-        verifier.commit(caller.nonce, caller.fingerprint);
-        res.writeHead(200, {
+        return doneRaw(200, {
           'content-type': message.content_type || 'application/octet-stream',
           'content-length': buffer.length,
-        });
-        return res.end(buffer);
+        }, buffer);
       }
 
       // ---- inbox ----------------------------------------------------------
       if (resource === 'inbox' && method === 'GET') {
         return done(200, {
           agent: caller.fingerprint,
+          // linkStatus === 'active', deliberately NOT readableBetween like
+          // every sibling read surface. Spec §8: a revoked peer's undelivered
+          // messages are dropped from your inbox index, whichever side
+          // revoked — the inbox is a queue of work to do, not history to
+          // read, and there is nothing to do about a peer you disconnected.
+          // The records and thread events stay on disk and stay readable
+          // through /v1/messages and /v1/threads. Narrower than
+          // readableBetween on purpose, not by oversight.
           messages: store.inbox(caller.fingerprint, {
             isVisible: (message) => registry.linkStatus(caller.fingerprint, message.from) === 'active',
           }),
@@ -216,7 +243,7 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
       }
       if (resource === 'offers' && method === 'POST' && id && action === 'respond') {
         const b = await jsonBody();
-        const offer = assertParticipant(store.getOffer(id), caller.fingerprint);
+        const offer = assertParticipantIgnoringLink(store.getOffer(id), caller.fingerprint);
         // Writes need a genuinely active link, not just "you may still read
         // your own history" — the revoker does not get to keep transacting
         // either. requireActiveLink, not readableBetween, on purpose.
@@ -229,7 +256,7 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         }));
       }
       if (resource === 'offers' && method === 'PUT' && id && action === 'payload') {
-        const offer = assertParticipant(store.getOffer(id), caller.fingerprint);
+        const offer = assertParticipantIgnoringLink(store.getOffer(id), caller.fingerprint);
         requireActiveLink(registry, offer.from, offer.to);
         const buffer = await readBody(req, MAX_BLOB_BYTES);
         verifier.confirmBody(caller.claimedBodyHash, buffer);
@@ -238,33 +265,28 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
       }
       if (resource === 'offers' && method === 'POST' && id && action === 'close') {
         await jsonBody();
-        const offer = assertParticipant(store.getOffer(id), caller.fingerprint);
+        const offer = assertParticipantIgnoringLink(store.getOffer(id), caller.fingerprint);
         requireActiveLink(registry, offer.from, offer.to);
         return done(200, store.closeOffer({ agent: caller.fingerprint, offerId: id }));
       }
 
       // ---- threads --------------------------------------------------------
       if (resource === 'threads' && method === 'GET' && !id) {
-        const scoped = scopeThreads(store.listThreads(null), caller.fingerprint);
-        const visible = scoped.filter((thread) => {
-          const other = thread.participants.find((p) => p !== caller.fingerprint);
-          return !other || readableBetween(registry, caller.fingerprint, other);
-        });
+        // scopeThreads narrows to the caller's own; threadReadableBy then
+        // drops the ones whose peer link is revoked against them. Both sides
+        // of the thread rule live in authz.mjs — no participant arithmetic
+        // here, which is how this surface and the one below each grew their
+        // own copy of it.
+        const visible = scopeThreads(store.listThreads(null), caller.fingerprint)
+          .filter((thread) => threadReadableBy(registry, thread.participants, caller.fingerprint));
         return done(200, { threads: visible });
       }
       if (resource === 'threads' && method === 'GET' && id) {
-        const events = store.readThread(id);
-        const participants = events[0]?.participants ?? [];
-        if (!participants.includes(caller.fingerprint)) {
-          throw new StoreError('not_found', 'no such thread', 404);
-        }
         // A revoked peer keeps no read access to a thread's history either —
         // it carries subjects and byte counts, not just metadata. Same 404 a
-        // nonexistent thread gets, so this cannot become an existence oracle.
-        const other = participants.find((p) => p !== caller.fingerprint);
-        if (other && !readableBetween(registry, caller.fingerprint, other)) {
-          throw new StoreError('not_found', 'no such thread', 404);
-        }
+        // non-participant and a nonexistent thread get, so this cannot become
+        // an existence oracle.
+        const events = assertReadableThread(registry, store.readThread(id), caller.fingerprint);
         return done(200, { thread_id: id, events });
       }
 
@@ -361,6 +383,13 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         // also what a stranger's fingerprint produces — nothing is disclosed.
         // It also validates `id` as a fingerprint internally (requireFingerprint),
         // so a malformed :fingerprint surfaces as a typed 400, not a native throw.
+        //
+        // The route deliberately does NOT require the link to be active: a
+        // revoke must stay safe to retry. What makes that safe is revokeLink
+        // being idempotent — a second revoke, from either side, returns the
+        // standing record and never rewrites `revoked_by`. Without that, the
+        // revoked peer could send one revoke of their own and swap which side
+        // of the asymmetry they are on.
         const link = registry.revokeLink({ a: caller.fingerprint, b: id, by: caller.fingerprint });
         return done(200, {
           fingerprint: id,

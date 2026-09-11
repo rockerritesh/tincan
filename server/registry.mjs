@@ -169,9 +169,29 @@ export class Registry {
     return record;
   }
 
+  // `revoked_by` is not an audit decoration — `authz.readableBetween` reads it
+  // to decide who keeps access to the shared history, so it is authorization
+  // input on every read surface. Two consequences, both load-bearing:
+  //
+  // 1. It is validated, not stored as whatever arrived. The only route that
+  //    reaches here passes `caller.fingerprint`, so there is no injection
+  //    today; the guard is here so that stays true of the next caller.
+  // 2. Revoking an already-revoked link is idempotent — the existing record
+  //    comes back untouched. Rewriting `revoked_by` would let the *revoked*
+  //    peer send one revoke of their own, become the revoker, and invert the
+  //    asymmetry: they regain the shared history and lock the original
+  //    revoker out of their own copy. Spec §8 promises the opposite ("a
+  //    revoke is one more auditable event, not an erasure"), so the first
+  //    revocation is the one that stands. `disconnect_peer` stays safe to
+  //    retry, and a stranger or an unknown fingerprint still gets a 404.
   revokeLink({ a, b, by }) {
+    requireFingerprint(by, 'by');
     const record = this.getLink(a, b);
     if (!record) throw new StoreError('no_link', 'there is no link to revoke', 404);
+    if (record.a !== by && record.b !== by) {
+      throw new StoreError('not_a_party', 'only a party to a link may revoke it', 403);
+    }
+    if (record.status === 'revoked') return record;
     record.status = 'revoked';
     record.revoked_at = nowIso();
     record.revoked_by = by;

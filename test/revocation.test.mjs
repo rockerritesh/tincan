@@ -277,3 +277,296 @@ test('offer respond, close and payload upload all require an active link, not ju
   assert.equal(payloadRes.status, 403);
   assert.equal(payloadRes.body.error, 'no_link');
 });
+
+// ---- fix round 2: the missing axis — revoked PARTICIPANT × MUTATING route --
+//
+// The suite could not see either of the two Critical blockers below because of
+// a structural gap, not a missing assertion. test/authz.test.mjs pivots on
+// *non-participant* attackers (eve, carol); everything above this line pivots
+// on *read* routes. The intersection — a genuine participant whose link has
+// been revoked, reaching a route that WRITES — had no tests in it at all, and
+// that is exactly where both blockers lived.
+//
+// So enumerate it. Every mutating route a revoked participant can still reach
+// gets an assertion here, whether or not it was broken: the ack route and the
+// revoke route were the two bugs, and the three offer write routes were
+// already gated in the previous round and stand here as regression guards. A
+// route added to this surface later should be added to this list.
+
+// Sets up alice -> bob with one message, one thread, one uploaded payload, then
+// has alice revoke bob. Returns everything bob knows the id of, which is the
+// worst realistic case: a peer who was a participant right up to the revoke.
+async function revokedBob(t) {
+  const { broker, alice, bob } = await pairedPair(t);
+
+  const message = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+    to: bob.fingerprint, subject: 'secret one', body: 'TOP SECRET ONE',
+  });
+  const unread = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+    to: bob.fingerprint, subject: 'secret two', body: 'TOP SECRET TWO',
+  });
+
+  // A blob bob never downloads, so its 404 later cannot be a cache artifact.
+  const offer = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'a file', size_bytes: 11,
+  });
+  await signedApi(broker.baseUrl, bob, 'POST', `/v1/offers/${offer.body.id}/respond`, { accept: true });
+  const up = await signedUpload(
+    broker.baseUrl, alice, `/v1/offers/${offer.body.id}/payload`, Buffer.from('SECRETBLOB!'),
+  );
+
+  const revoke = await signedApi(broker.baseUrl, alice, 'POST', `/v1/peers/${bob.fingerprint}/revoke`, {});
+  assert.equal(revoke.status, 200, 'the revoke itself must land');
+
+  return {
+    broker,
+    alice,
+    bob,
+    messageId: message.body.id,
+    unreadId: unread.body.id,
+    threadId: message.body.thread_id,
+    blobMessageId: up.body.message.id,
+  };
+}
+
+function readEvents(thread) {
+  return thread.body.events ?? [];
+}
+
+// ---- C1 -------------------------------------------------------------------
+//
+// The route checked only that *a* link record existed, and revokeLink rewrote
+// `revoked_by` unconditionally. readableBetween decides read access solely
+// from `revoked_by`, so one signed counter-revoke from the revoked peer
+// inverted the whole asymmetry: bob regained every shared record — including
+// a message he had never fetched — and alice was locked out of her own copy.
+// Spec §8's central promise ("your copy of the history stays readable by you…
+// a revoke is one more auditable event, not an erasure") became an erasure of
+// the *revoker's* access.
+
+test('a revoked peer cannot counter-revoke their way back into the history', async (t) => {
+  const { broker, alice, bob, messageId, unreadId, threadId, blobMessageId } = await revokedBob(t);
+
+  // Pre-condition: the revocation is doing its job before bob tries anything.
+  assert.equal(
+    (await signedApi(broker.baseUrl, bob, 'GET', `/v1/messages/${unreadId}`)).status, 404,
+  );
+
+  // The attack: one signed revoke of alice, from the peer alice just revoked.
+  const counter = await signedApi(broker.baseUrl, bob, 'POST', `/v1/peers/${alice.fingerprint}/revoke`, {});
+
+  // It is not an error — a revoke must stay safe to retry, and from bob's side
+  // "this link is revoked" is simply true. It must also change nothing.
+  assert.equal(counter.status, 200, 'idempotent, not an error: disconnect_peer must be retryable');
+  assert.equal(counter.body.status, 'revoked');
+
+  const link = broker.registry.getLink(alice.fingerprint, bob.fingerprint);
+  assert.equal(link.revoked_by, alice.fingerprint, 'the first revocation is the one that stands');
+  assert.equal(counter.body.revoked_at, link.revoked_at, 'revoked_at must not be rewritten either');
+
+  // bob is still the revoked peer, on every surface.
+  for (const [path, what] of [
+    [`/v1/messages/${messageId}`, 'a message he had already seen'],
+    [`/v1/messages/${unreadId}`, 'a message he never fetched'],
+    [`/v1/messages/${blobMessageId}`, 'the offer message'],
+    [`/v1/messages/${blobMessageId}/payload`, 'the payload bytes'],
+    [`/v1/threads/${threadId}`, 'the thread history'],
+  ]) {
+    const res = await signedApi(broker.baseUrl, bob, 'GET', path);
+    assert.equal(res.status, 404, `bob must stay locked out of ${what}`);
+  }
+  const bobThreads = await signedApi(broker.baseUrl, bob, 'GET', '/v1/threads');
+  assert.equal(bobThreads.body.threads.length, 0, 'and out of the thread listing');
+
+  // And alice — the revoker — still holds her own copy, which is the half of
+  // the guarantee the inversion destroyed.
+  const aliceMessage = await signedApi(broker.baseUrl, alice, 'GET', `/v1/messages/${unreadId}`);
+  assert.equal(aliceMessage.status, 200, 'the revoker must never be locked out of her own record');
+  assert.equal(aliceMessage.body.body, 'TOP SECRET TWO');
+
+  const aliceThread = await signedApi(broker.baseUrl, alice, 'GET', `/v1/threads/${threadId}`);
+  assert.equal(aliceThread.status, 200);
+  assert.ok(
+    readEvents(aliceThread).some((e) => e.type === 'message.sent' && e.message_id === messageId),
+    "the revoker's thread history is intact, not merely reachable",
+  );
+
+  const aliceThreads = await signedApi(broker.baseUrl, alice, 'GET', '/v1/threads');
+  assert.ok(aliceThreads.body.threads.length >= 1, "the revoker's listing survives too");
+
+  const alicePayload = await signedApi(broker.baseUrl, alice, 'GET', `/v1/messages/${blobMessageId}/payload`);
+  assert.equal(alicePayload.status, 200);
+  assert.equal(alicePayload.body.toString(), 'SECRETBLOB!');
+});
+
+test('a second revoke by the revoker is idempotent too, so a retry is harmless', async (t) => {
+  const { broker, alice, bob } = await pairedPair(t);
+  const first = await signedApi(broker.baseUrl, alice, 'POST', `/v1/peers/${bob.fingerprint}/revoke`, {});
+  const second = await signedApi(broker.baseUrl, alice, 'POST', `/v1/peers/${bob.fingerprint}/revoke`, {});
+  assert.equal(second.status, 200);
+  assert.deepEqual(second.body, first.body, 'the standing record, byte for byte');
+});
+
+test('only a party to a link may revoke it, even with a valid signature', async (t) => {
+  // Unreachable through the route (it always passes caller.fingerprint as
+  // `by`), which is precisely why it is asserted at the Registry: `revoked_by`
+  // is authorization input for every read surface now, not an audit field, so
+  // the guard has to hold for the next caller as well as this one.
+  const { broker, alice, bob } = await pairedPair(t);
+  const carol = broker.identity('carol');
+  assert.throws(
+    () => broker.registry.revokeLink({ a: alice.fingerprint, b: bob.fingerprint, by: carol.fingerprint }),
+    (e) => e.code === 'not_a_party' && e.status === 403,
+  );
+  assert.throws(
+    () => broker.registry.revokeLink({ a: alice.fingerprint, b: bob.fingerprint, by: 'not-a-fingerprint' }),
+    (e) => e.code === 'invalid_fingerprint' && e.status === 400,
+    'revoked_by is validated, not stored as whatever arrived',
+  );
+  assert.equal(
+    broker.registry.getLink(alice.fingerprint, bob.fingerprint).status, 'active',
+    'a refused revoke must not have written anything',
+  );
+});
+
+// ---- C2 -------------------------------------------------------------------
+//
+// POST /v1/messages/:id/ack used a bare participancy check and then returned
+// store.ackRead(...), which is the complete message record, `body` included.
+// So the same record GET /v1/messages/:id correctly 404s to a revoked peer
+// came back 200 with its contents through the ack door: two doors on one
+// record, one of them locked. It also flipped the status to `read` and
+// appended a message.read event to the *revoker's* append-only thread log.
+
+test('the ack route neither discloses nor acts for a revoked peer', async (t) => {
+  const { broker, alice, bob, unreadId, threadId } = await revokedBob(t);
+
+  const before = readEvents(await signedApi(broker.baseUrl, alice, 'GET', `/v1/threads/${threadId}`));
+  assert.equal(
+    before.some((e) => e.type === 'message.read' && e.message_id === unreadId), false,
+    'pre-condition: nothing has acked this message yet',
+  );
+
+  const ack = await signedApi(broker.baseUrl, bob, 'POST', `/v1/messages/${unreadId}/ack`, {});
+
+  // The same answer the read path gives, so the ack door cannot be used as an
+  // oracle for a record the read door hides.
+  const read = await signedApi(broker.baseUrl, bob, 'GET', `/v1/messages/${unreadId}`);
+  assert.equal(ack.status, 404, 'the ack door must be as locked as the read door');
+  assert.equal(ack.body.error, read.body.error);
+  assert.equal(ack.body.message, read.body.message, 'byte-identical to the read refusal');
+  assert.equal('body' in ack.body, false, 'and it must not carry the record it refused');
+
+  // It must also not have acted. Both halves matter: the status on alice's
+  // record, and her append-only log, which a revoked peer must not be able to
+  // write to.
+  const after = readEvents(await signedApi(broker.baseUrl, alice, 'GET', `/v1/threads/${threadId}`));
+  assert.equal(
+    after.some((e) => e.type === 'message.read' && e.message_id === unreadId), false,
+    "a revoked peer must not append to the revoker's thread log",
+  );
+  assert.equal(after.length, before.length, 'no event of any type was appended');
+
+  const aliceView = await signedApi(broker.baseUrl, alice, 'GET', `/v1/messages/${unreadId}`);
+  assert.equal(aliceView.status, 200);
+  assert.notEqual(aliceView.body.status, 'read', 'the message status was not flipped');
+});
+
+test('the revoker keeps their own ack, so the fix is not a blanket block', async (t) => {
+  // The asymmetry has two halves and only one of them was broken. bob revokes
+  // alice here, so bob is the revoker and the message addressed to him is
+  // still his to ack.
+  const { broker, alice, bob } = await pairedPair(t);
+  const sent = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+    to: bob.fingerprint, subject: 'mine to ack', body: 'x',
+  });
+  await signedApi(broker.baseUrl, bob, 'POST', `/v1/peers/${alice.fingerprint}/revoke`, {});
+
+  const ack = await signedApi(broker.baseUrl, bob, 'POST', `/v1/messages/${sent.body.id}/ack`, {});
+  assert.equal(ack.status, 200, "the revoker's own ack must still work");
+  assert.equal(ack.body.status, 'read');
+});
+
+test('a sender acking is still ackRead\'s own 403, not a 404', async (t) => {
+  // Left deliberately as it was: not_recipient discloses nothing a sender does
+  // not already know, and the global rule reserves 403 for "your own identity
+  // is the problem", which this is. Pinned so the C2 fix cannot quietly widen
+  // into it.
+  const { broker, alice, bob } = await pairedPair(t);
+  const sent = await signedApi(broker.baseUrl, alice, 'POST', '/v1/messages', {
+    to: bob.fingerprint, subject: 'x', body: 'y',
+  });
+  const res = await signedApi(broker.baseUrl, alice, 'POST', `/v1/messages/${sent.body.id}/ack`, {});
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error, 'not_recipient');
+});
+
+// ---- the rest of the axis, as regression guards ---------------------------
+//
+// Task 10 already gated these three with requireActiveLink. They belong in this
+// list anyway: the axis is the control, and a route that is only correct by
+// accident of when it was written is one refactor from joining C2.
+
+test('every offer write route refuses the revoked peer, from the revoked side', async (t) => {
+  const { broker, alice, bob } = await pairedPair(t);
+
+  // Three offers FROM bob, so bob is the one who owns the close and upload
+  // rights — the tests above this line only ever exercised those from the
+  // revoker's side, which is the weaker direction.
+  const toRespond = await signedApi(broker.baseUrl, alice, 'POST', '/v1/offers', {
+    to: bob.fingerprint, subject: 'bob responds', size_bytes: 4,
+  });
+  const toClose = await signedApi(broker.baseUrl, bob, 'POST', '/v1/offers', {
+    to: alice.fingerprint, subject: 'bob closes', size_bytes: 4,
+  });
+  const toUpload = await signedApi(broker.baseUrl, bob, 'POST', '/v1/offers', {
+    to: alice.fingerprint, subject: 'bob uploads', size_bytes: 4,
+  });
+  await signedApi(broker.baseUrl, alice, 'POST', `/v1/offers/${toUpload.body.id}/respond`, { accept: true });
+
+  await signedApi(broker.baseUrl, alice, 'POST', `/v1/peers/${bob.fingerprint}/revoke`, {});
+
+  const respond = await signedApi(
+    broker.baseUrl, bob, 'POST', `/v1/offers/${toRespond.body.id}/respond`, { accept: true },
+  );
+  assert.equal(respond.status, 403);
+  assert.equal(respond.body.error, 'no_link');
+
+  const close = await signedApi(broker.baseUrl, bob, 'POST', `/v1/offers/${toClose.body.id}/close`, {});
+  assert.equal(close.status, 403);
+  assert.equal(close.body.error, 'no_link');
+
+  const upload = await signedUpload(
+    broker.baseUrl, bob, `/v1/offers/${toUpload.body.id}/payload`, Buffer.from('data'),
+  );
+  assert.equal(upload.status, 403);
+  assert.equal(upload.body.error, 'no_link');
+
+  // And none of the three left a mark on the records.
+  assert.equal(broker.store.getOffer(toRespond.body.id).status, 'pending');
+  assert.equal(broker.store.getOffer(toClose.body.id).status, 'pending');
+  assert.equal(broker.store.getOffer(toUpload.body.id).blob_bytes ?? null, null);
+});
+
+test('a revoked peer cannot open new traffic on the shared thread either', async (t) => {
+  // The send routes are the other two mutating surfaces on the axis. They were
+  // correct from the start (requireActiveLink was Task 7's first gate), but an
+  // enumeration with a hole in it is how both blockers survived sixteen
+  // reviews, so the hole is closed rather than assumed.
+  const { broker, alice, bob, threadId } = await revokedBob(t);
+
+  for (const [resource, body] of [
+    ['/v1/messages', { to: alice.fingerprint, subject: 'still here', body: 'x', thread_id: threadId }],
+    ['/v1/offers', { to: alice.fingerprint, subject: 'still here', size_bytes: 4, thread_id: threadId }],
+  ]) {
+    const res = await signedApi(broker.baseUrl, bob, 'POST', resource, body);
+    assert.equal(res.status, 403, `${resource} must refuse the revoked peer`);
+    assert.equal(res.body.error, 'no_link');
+  }
+
+  const thread = await signedApi(broker.baseUrl, alice, 'GET', `/v1/threads/${threadId}`);
+  assert.equal(
+    readEvents(thread).some((e) => e.subject === 'still here'), false,
+    "nothing reached the revoker's thread",
+  );
+});

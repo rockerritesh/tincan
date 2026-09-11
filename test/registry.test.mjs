@@ -138,6 +138,17 @@ test('an unknown code does not reveal whether any invite exists', () => {
   );
 });
 
+test('a malformed code is treated as unknown, not a crash', () => {
+  const r = fresh();
+  const malformed = 'ZZZZ-ZZZZ-ZZZZ-!!!!'; // '!' is outside the Crockford alphabet
+  assert.doesNotThrow(() => r.getInviteByCode(malformed));
+  assert.equal(r.getInviteByCode(malformed), null);
+  assert.throws(
+    () => r.consumeInvite({ code: malformed, redeemer: fpB }),
+    (e) => e.code === 'unknown_invite' && e.status === 404,
+  );
+});
+
 test('codes are normalized, so how a human types them does not matter', () => {
   const r = fresh();
   const { code } = r.createInvite({ issuer: fpA, issuerLabel: 'alice' });

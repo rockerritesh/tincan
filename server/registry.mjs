@@ -95,6 +95,12 @@ export class Registry {
     return path.join(this.dirs.keys, `${requireFingerprint(fingerprint, 'key')}.json`);
   }
 
+  // Trust boundary: the caller must already have cryptographically verified a
+  // signature from `publicKeyB64` and derived `fingerprint` from that same
+  // key before calling this. registerKey deliberately does not re-derive the
+  // fingerprint from publicKeyB64 to check they agree — its only legitimate
+  // caller has already done so. A second caller that skips that step could
+  // register a fingerprint against a key that doesn't produce it.
   registerKey({ fingerprint, publicKeyB64, label, via }) {
     const existing = this.getKey(fingerprint);
     if (existing) return existing;
@@ -221,17 +227,24 @@ export class Registry {
   }
 
   getInviteByCode(code) {
-    return this.#readJson(this.#invitePath(hashCode(code)));
+    // A code with a character outside the Crockford alphabet cannot have been
+    // issued by createInvite, so it matches no invite — return null rather
+    // than let normalizeBase32's native Error escape this public method.
+    let hashed;
+    try {
+      hashed = hashCode(code);
+    } catch {
+      return null;
+    }
+    return this.#readJson(this.#invitePath(hashed));
   }
 
   consumeInvite({ code, redeemer, now = Date.now() }) {
     requireFingerprint(redeemer, 'redeemer');
-    let invite;
-    try {
-      invite = this.getInviteByCode(code);
-    } catch {
-      throw new StoreError('unknown_invite', 'no such invite', 404);
-    }
+    // getInviteByCode itself upholds the "record or null" contract — a
+    // malformed code returns null rather than throwing — so no try/catch is
+    // needed here.
+    const invite = this.getInviteByCode(code);
     if (!invite) throw new StoreError('unknown_invite', 'no such invite', 404);
 
     if (invite.status !== 'open') {

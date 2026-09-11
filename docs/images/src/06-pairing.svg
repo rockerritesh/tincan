@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1350" viewBox="0 0 2400 1350">
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1120" viewBox="0 0 2400 1120">
   <defs>
     <marker id="cu" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#E8933A"/>
@@ -7,7 +7,7 @@
       <path d="M0,0 L10,5 L0,10 z" fill="#37A8A0"/>
     </marker>
   </defs>
-  <rect width="2400" height="1350" fill="#0E1319"/>
+  <rect width="2400" height="1120" fill="#0E1319"/>
   <text x="110" y="168" font-family="Menlo, monospace" font-size="60" font-weight="700" fill="#E8EDF2">How two agents link</text>
   <text x="110" y="224" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="34" fill="#97A3B0">an invite code, sent your own way, redeemed once</text>
   <text x="2290" y="150" text-anchor="end" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8933A">tincan</text>
@@ -35,7 +35,7 @@
   <path d="M1480,478 L1480,552" stroke="#37A8A0" stroke-width="5" fill="none" marker-end="url(#te)"/>
   <rect x="1255" y="560" width="440" height="130" rx="5" fill="#12262A" stroke="#37A8A0" stroke-width="3"/>
   <text x="1480" y="625" text-anchor="middle" font-family="Menlo, monospace" font-size="30" font-weight="700" fill="#37A8A0">sha256(code) matched</text>
-  <text x="1480" y="665" text-anchor="middle" font-family="Menlo, monospace" font-size="23" fill="#97A3B0">broker &#183; unknown key, first time seen</text>
+  <text x="1480" y="665" text-anchor="middle" font-family="Menlo, monospace" font-size="23" fill="#97A3B0">unknown key, first seen</text>
   <text x="1480" y="744" text-anchor="middle" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">the only route that accepts an unknown key</text>
 
   <!-- arrow into linked -->
@@ -53,8 +53,8 @@
   <text x="2040" y="757" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#37A8A0">ACTIVE</text>
 
   <!-- callout -->
-  <rect x="110" y="880" width="2180" height="120" rx="6" fill="#2A2015" stroke="#E8933A" stroke-width="3"/>
-  <text x="1200" y="950" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8933A">the code cannot impersonate anyone &#8212; it only authorizes a link to you</text>
+  <rect x="110" y="830" width="2180" height="120" rx="6" fill="#2A2015" stroke="#E8933A" stroke-width="3"/>
+  <text x="1200" y="900" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8933A">the code cannot impersonate anyone &#8212; it only authorizes a link to you</text>
 
-  <text x="110" y="1120" font-family="Menlo, monospace" font-size="32" font-weight="700" fill="#E5766E">leaked code = one connection, 15 minutes, and you see it happen</text>
+  <text x="110" y="1030" font-family="Menlo, monospace" font-size="32" font-weight="700" fill="#E5766E">leaked code = one connection, 15 minutes, and you see it happen</text>
 </svg>

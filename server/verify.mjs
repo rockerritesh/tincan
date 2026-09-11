@@ -11,11 +11,17 @@ import { fingerprintFromPublicKey } from '../shared/fingerprint.mjs';
 import { canonicalString, bodySha256, HEADERS, CLOCK_SKEW_MS, NONCE_TTL_MS } from '../shared/canonical.mjs';
 
 export function createVerifier({ registry, now = () => Date.now() }) {
-  const seen = new Map(); // nonce -> expiry ms
+  // nonce -> { expiresAt, spent }. A nonce is *reserved* the moment the replay
+  // check passes and *spent* once the request succeeds. Reserving matters
+  // because a route's `await jsonBody()` sits between the two: without it, two
+  // copies of one captured request would both pass the check and both act.
+  // Reservations expire on the same TTL, so a crash between reserve and release
+  // cannot wedge a nonce forever.
+  const seen = new Map();
 
   const sweep = setInterval(() => {
     const cutoff = now();
-    for (const [nonce, expiry] of seen) if (expiry <= cutoff) seen.delete(nonce);
+    for (const [nonce, entry] of seen) if (entry.expiresAt <= cutoff) seen.delete(nonce);
   }, 60000);
   sweep.unref?.();
 
@@ -90,20 +96,34 @@ export function createVerifier({ registry, now = () => Date.now() }) {
         }
       }
 
+      // 7. reserve the nonce. Nothing above this line awaits, so the check at
+      // step 4 and this reservation are one atomic step — a duplicate arriving
+      // while this request reads its body finds the reservation and is refused.
+      // Reserved last so a request rejected above leaves nothing behind.
+      seen.set(nonce, { expiresAt: now() + NONCE_TTL_MS, spent: false });
+
       return { fingerprint, publicKeyB64, claimedBodyHash, nonce };
     },
 
-    // 7. body integrity, after the cheap checks have already passed
+    // 8. body integrity, after the cheap checks have already passed
     confirmBody(claimedBodyHash, buffer) {
       if (bodySha256(buffer) !== claimedBodyHash) {
         throw new StoreError('body_mismatch', 'body does not match the signed hash', 400);
       }
     },
 
-    // 8. spend the nonce only once the request is known good, so a rejected
-    // request does not stop an honest retry.
+    // 9. drop a reservation, so a request that failed after verifying does not
+    // stop an honest retry of the same signed request. A nonce that already
+    // reached commit() is spent and stays spent: releasing it must not reopen
+    // the replay window.
+    release(nonce) {
+      const entry = seen.get(nonce);
+      if (entry && !entry.spent) seen.delete(nonce);
+    },
+
+    // 10. promote the reservation to spent, once the request is known good.
     commit(nonce, fingerprint) {
-      seen.set(nonce, now() + NONCE_TTL_MS);
+      seen.set(nonce, { expiresAt: now() + NONCE_TTL_MS, spent: true });
       registry.touchKey(fingerprint);
     },
 

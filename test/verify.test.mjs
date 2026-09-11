@@ -118,12 +118,47 @@ test('a failed request does not burn its nonce, so an honest retry still works',
   const { identity, verifier } = harness();
   t.after(() => verifier.stop());
   const { req, url } = reqFor(identity, { body: '{"a":1}' });
-  verifier.verifyHeaders(req, url);
+  const caller = verifier.verifyHeaders(req, url);
   assert.throws(
     () => verifier.confirmBody(req.headers[HEADERS.bodyHash], Buffer.from('tampered')),
     (e) => e.code === 'body_mismatch' && e.status === 400,
   );
+  // verifyHeaders reserves the nonce, so a failed request has to hand it back
+  // for the retry to work. This is what the broker's catch block does.
+  verifier.release(caller.nonce);
   assert.doesNotThrow(() => verifier.verifyHeaders(req, url), 'nonce is only spent on success');
+});
+
+// The replay check and the commit used to be separated by the route's
+// `await jsonBody()`, so two copies of one captured request could both pass the
+// check and both mutate the store. verifyHeaders now reserves the nonce the
+// moment the check passes, and there is no await in it, so test-and-reserve is
+// atomic on Node's single thread.
+test('a second use of a nonce still in flight is a replay, not a race', (t) => {
+  const { identity, verifier } = harness();
+  t.after(() => verifier.stop());
+  const { req, url } = reqFor(identity, { body: '{"a":1}' });
+  verifier.verifyHeaders(req, url);
+  // No commit in between: this is the duplicate arriving while the first
+  // request is still reading its body.
+  assert.throws(
+    () => verifier.verifyHeaders(req, url),
+    (e) => e.code === 'replay' && e.status === 401,
+  );
+});
+
+test('releasing a nonce that was already committed does not reopen it', (t) => {
+  const { identity, verifier } = harness();
+  t.after(() => verifier.stop());
+  const { req, url } = reqFor(identity);
+  const caller = verifier.verifyHeaders(req, url);
+  verifier.commit(caller.nonce, caller.fingerprint);
+  verifier.release(caller.nonce);
+  assert.throws(
+    () => verifier.verifyHeaders(req, url),
+    (e) => e.code === 'replay' && e.status === 401,
+    'a spent nonce must stay spent even if a later error path releases it',
+  );
 });
 
 test('tampering with method, path, query order or body hash breaks the signature', (t) => {

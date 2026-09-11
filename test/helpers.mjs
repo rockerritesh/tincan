@@ -64,11 +64,13 @@ export async function startBroker() {
   };
 }
 
-// Signs as `identity`. Pass identity = null to send an unsigned request.
-export async function signedApi(baseUrl, identity, method, pathname, body) {
+// Signs as `identity`. Pass identity = null to send an unsigned request, and
+// `token` to present the coarse BROKER_TOKEN gate's bearer header.
+export async function signedApi(baseUrl, identity, method, pathname, body, { token } = {}) {
   const url = new URL(`${baseUrl}${pathname}`);
   const payload = body === undefined ? undefined : JSON.stringify(body);
   const headers = payload === undefined ? {} : { 'content-type': 'application/json' };
+  if (token) headers.authorization = `Bearer ${token}`;
 
   if (identity) {
     Object.assign(headers, signedHeaders(identity, {

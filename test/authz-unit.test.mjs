@@ -1,7 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requireActiveLink, assertParticipant, visibleToCaller, scopeThreads } from '../server/authz.mjs';
+import {
+  requireActiveLink,
+  assertParticipant,
+  assertTwoPartyThread,
+  visibleToCaller,
+  scopeThreads,
+} from '../server/authz.mjs';
 import { Registry } from '../server/registry.mjs';
+import { Store } from '../server/store.mjs';
 import { fingerprintFromPublicKey } from '../shared/fingerprint.mjs';
 import { tempDir } from './helpers.mjs';
 
@@ -103,4 +110,42 @@ test('the two 404 errors (null record vs. non-participant) are indistinguishable
   assert.equal(nullError.code, nonParticipantError.code, 'error codes must match');
   assert.equal(nullError.status, nonParticipantError.status, 'error statuses must match');
   assert.equal(nullError.message, nonParticipantError.message, 'error messages must be identical (prevents future divergence)');
+});
+
+test('a thread may only be joined by the pair that owns it', () => {
+  const store = new Store(tempDir('authz-thread'));
+  const first = store.createMessage({ from: a, to: b, subject: 'q', body: '?' });
+
+  // The owning pair, reached by either lever and in either direction.
+  assert.doesNotThrow(() => assertTwoPartyThread(store, { caller: a, to: b, replyTo: first.id }));
+  assert.doesNotThrow(() => assertTwoPartyThread(store, { caller: b, to: a, replyTo: first.id }));
+  assert.doesNotThrow(() => assertTwoPartyThread(store, { caller: b, to: a, threadId: first.thread_id }));
+
+  // A third party spliced in by either lever, refused as not_found so the
+  // refusal cannot be told apart from a thread that does not exist.
+  for (const args of [
+    { caller: b, to: c, replyTo: first.id },
+    { caller: b, to: c, threadId: first.thread_id },
+    { caller: c, to: b, replyTo: first.id },
+  ]) {
+    assert.throws(
+      () => assertTwoPartyThread(store, args),
+      (e) => e.code === 'not_found' && e.status === 404,
+    );
+  }
+});
+
+test('a new thread is not refused, and a missing parent is refused as not_found', () => {
+  const store = new Store(tempDir('authz-thread-new'));
+  // Neither lever supplied: a brand new thread, nothing to check.
+  assert.doesNotThrow(() => assertTwoPartyThread(store, { caller: a, to: b }));
+  // A thread_id the caller chose that does not exist yet: the store will
+  // create it naming this pair, so refusing here would break a legal send.
+  assert.doesNotThrow(() => assertTwoPartyThread(store, { caller: a, to: b, threadId: 'thr_brandnew' }));
+  // A reply_to that does not exist answers with the thread's code, not
+  // unknown_message, so missing and not-yours stay indistinguishable.
+  assert.throws(
+    () => assertTwoPartyThread(store, { caller: a, to: b, replyTo: 'msg_nope' }),
+    (e) => e.code === 'not_found' && e.status === 404,
+  );
 });

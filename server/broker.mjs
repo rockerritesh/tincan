@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { Store, StoreError, MAX_INLINE_BYTES } from './store.mjs';
 import { Registry } from './registry.mjs';
 import { createVerifier } from './verify.mjs';
-import { requireActiveLink, assertParticipant, scopeThreads } from './authz.mjs';
+import { requireActiveLink, assertParticipant, assertTwoPartyThread, scopeThreads } from './authz.mjs';
 
 const MAX_JSON_BYTES = 1 * 1024 * 1024;
 const MAX_BLOB_BYTES = Number(process.env.MAX_BLOB_BYTES ?? 64 * 1024 * 1024);
@@ -58,9 +58,13 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
     const segments = url.pathname.split('/').filter(Boolean);
     const method = req.method;
 
+    // Hoisted so the catch below can hand back a reserved nonce. Null until a
+    // signature has actually been verified.
+    let caller = null;
+
     try {
       if (segments[0] !== 'v1') {
-        return fail(res, 404, 'not_found', `no route for ${method} ${url.pathname}`);
+        throw new StoreError('not_found', `no route for ${method} ${url.pathname}`, 404);
       }
       const [, resource, id, action] = segments;
 
@@ -92,7 +96,7 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
       // never seen: the signature proves the caller holds it, the code proves
       // the issuer invited them.
       const isRedeem = resource === 'invites' && method === 'POST' && id === 'redeem';
-      const caller = verifier.verifyHeaders(req, url, { allowUnregistered: isRedeem });
+      caller = verifier.verifyHeaders(req, url, { allowUnregistered: isRedeem });
 
       // Reads the body when a route needs one, and proves it is the body that
       // was signed. Called only after the caller is known good.
@@ -124,6 +128,12 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
       if (resource === 'messages' && method === 'POST' && !id) {
         const b = await jsonBody();
         requireActiveLink(registry, caller.fingerprint, b.to);
+        assertTwoPartyThread(store, {
+          caller: caller.fingerprint,
+          to: b.to,
+          threadId: b.thread_id,
+          replyTo: b.reply_to,
+        });
         const message = store.createMessage({
           from: caller.fingerprint,       // never b.from
           to: b.to,
@@ -163,6 +173,12 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
       if (resource === 'offers' && method === 'POST' && !id) {
         const b = await jsonBody();
         requireActiveLink(registry, caller.fingerprint, b.to);
+        assertTwoPartyThread(store, {
+          caller: caller.fingerprint,
+          to: b.to,
+          threadId: b.thread_id,
+          replyTo: b.reply_to,
+        });
         return done(201, store.createOffer({
           from: caller.fingerprint,
           to: b.to,
@@ -219,8 +235,12 @@ export function createServer(store, registry, { verifier = createVerifier({ regi
         return done(200, { thread_id: id, events });
       }
 
-      return fail(res, 404, 'not_found', `no route for ${method} ${url.pathname}`);
+      throw new StoreError('not_found', `no route for ${method} ${url.pathname}`, 404);
     } catch (err) {
+      // Every failure path releases the nonce reserved by verifyHeaders, so a
+      // rejected request never costs an honest client its retry. A nonce that
+      // reached commit() is already spent and release leaves it that way.
+      if (caller) verifier.release(caller.nonce);
       if (err instanceof StoreError) return fail(res, err.status, err.code, err.message);
       console.error('[broker] unhandled', err);
       return fail(res, 500, 'internal_error', err.message);

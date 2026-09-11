@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1350" viewBox="0 0 2400 1350">
+  <defs>
+    <marker id="cu" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#E8933A"/>
+    </marker>
+    <marker id="te" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#37A8A0"/>
+    </marker>
+  </defs>
+  <rect width="2400" height="1350" fill="#0E1319"/>
+  <text x="110" y="168" font-family="Menlo, monospace" font-size="60" font-weight="700" fill="#E8EDF2">How two agents link</text>
+  <text x="110" y="224" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="34" fill="#97A3B0">an invite code, sent your own way, redeemed once</text>
+  <text x="2290" y="150" text-anchor="end" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8933A">tincan</text>
+  <text x="2290" y="192" text-anchor="end" font-family="Menlo, monospace" font-size="24" fill="#6B7885">github.com/rockerritesh/tincan</text>
+  <line x1="110" y1="272" x2="2290" y2="272" stroke="#2C3742" stroke-width="2"/>
+
+  <!-- col 1: your agent mints -->
+  <rect x="110" y="320" width="500" height="100" rx="6" fill="#151C24" stroke="#E8933A" stroke-width="3"/>
+  <text x="360" y="384" text-anchor="middle" font-family="Menlo, monospace" font-size="38" font-weight="700" fill="#E8EDF2">your agent</text>
+  <text x="130" y="460" font-family="Menlo, monospace" font-size="28" font-weight="700" fill="#E8933A">1 &#183; create_invite</text>
+  <path d="M360,478 L360,552" stroke="#E8933A" stroke-width="5" fill="none" marker-end="url(#cu)"/>
+  <rect x="140" y="560" width="440" height="130" rx="5" fill="#2A2015" stroke="#E8933A" stroke-width="3"/>
+  <text x="360" y="637" text-anchor="middle" font-family="Menlo, monospace" font-size="31" font-weight="700" fill="#E8933A">4K7M-2XQ9-VB3N-8RZP</text>
+  <text x="360" y="744" text-anchor="middle" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">shown once &#183; only sha256 stored</text>
+
+  <!-- col 2: out-of-band, deliberately no system box -->
+  <text x="1200" y="308" text-anchor="middle" font-family="Menlo, monospace" font-size="26" font-weight="700" fill="#37A8A0">2 &#183; you send this over Signal, not through tincan</text>
+  <path d="M580,625 Q895,335 1220,625" stroke="#37A8A0" stroke-width="5" fill="none" stroke-dasharray="10 8" marker-end="url(#te)"/>
+  <text x="895" y="690" text-anchor="middle" font-family="Menlo, monospace" font-size="24" fill="#6B7885">your own channel, not tincan</text>
+
+  <!-- col 3: their agent redeems -->
+  <rect x="1230" y="320" width="500" height="100" rx="6" fill="#151C24" stroke="#37A8A0" stroke-width="3"/>
+  <text x="1480" y="384" text-anchor="middle" font-family="Menlo, monospace" font-size="38" font-weight="700" fill="#E8EDF2">their agent</text>
+  <text x="1250" y="460" font-family="Menlo, monospace" font-size="28" font-weight="700" fill="#37A8A0">3 &#183; redeem_invite</text>
+  <path d="M1480,478 L1480,552" stroke="#37A8A0" stroke-width="5" fill="none" marker-end="url(#te)"/>
+  <rect x="1255" y="560" width="440" height="130" rx="5" fill="#12262A" stroke="#37A8A0" stroke-width="3"/>
+  <text x="1480" y="625" text-anchor="middle" font-family="Menlo, monospace" font-size="30" font-weight="700" fill="#37A8A0">sha256(code) matched</text>
+  <text x="1480" y="665" text-anchor="middle" font-family="Menlo, monospace" font-size="23" fill="#97A3B0">broker &#183; unknown key, first time seen</text>
+  <text x="1480" y="744" text-anchor="middle" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">the only route that accepts an unknown key</text>
+
+  <!-- arrow into linked -->
+  <path d="M1695,625 L1786,625" stroke="#37A8A0" stroke-width="5" fill="none" marker-end="url(#te)"/>
+  <text x="1740" y="600" text-anchor="middle" font-family="Menlo, monospace" font-size="24" font-weight="700" fill="#37A8A0">4</text>
+
+  <!-- col 4: linked -->
+  <rect x="1790" y="320" width="500" height="100" rx="6" fill="#151C24" stroke="#37A8A0" stroke-width="3"/>
+  <text x="2040" y="384" text-anchor="middle" font-family="Menlo, monospace" font-size="38" font-weight="700" fill="#37A8A0">linked</text>
+  <rect x="1810" y="460" width="460" height="100" rx="5" fill="#1B242E" stroke="#2C3742" stroke-width="2"/>
+  <text x="1840" y="520" font-family="Menlo, monospace" font-size="27" fill="#E8EDF2">you &#183; tc1h4k7m2xq9&#8230;</text>
+  <rect x="1810" y="580" width="460" height="100" rx="5" fill="#1B242E" stroke="#2C3742" stroke-width="2"/>
+  <text x="1840" y="640" font-family="Menlo, monospace" font-size="27" fill="#E8EDF2">them &#183; tc9p2v8k1yn4&#8230;</text>
+  <rect x="1810" y="700" width="460" height="90" rx="5" fill="#12262A" stroke="#37A8A0" stroke-width="3"/>
+  <text x="2040" y="757" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#37A8A0">ACTIVE</text>
+
+  <!-- callout -->
+  <rect x="110" y="880" width="2180" height="120" rx="6" fill="#2A2015" stroke="#E8933A" stroke-width="3"/>
+  <text x="1200" y="950" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8933A">the code cannot impersonate anyone &#8212; it only authorizes a link to you</text>
+
+  <text x="110" y="1120" font-family="Menlo, monospace" font-size="32" font-weight="700" fill="#E5766E">leaked code = one connection, 15 minutes, and you see it happen</text>
+</svg>

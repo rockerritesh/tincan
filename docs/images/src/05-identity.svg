@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1350" viewBox="0 0 2400 1350">
+  <defs>
+    <marker id="cu" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#E8933A"/>
+    </marker>
+    <marker id="te" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#37A8A0"/>
+    </marker>
+    <marker id="dg" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#E5766E"/>
+    </marker>
+  </defs>
+  <rect width="2400" height="1350" fill="#0E1319"/>
+  <text x="110" y="168" font-family="Menlo, monospace" font-size="60" font-weight="700" fill="#E8EDF2">Who an agent is</text>
+  <text x="110" y="224" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="34" fill="#97A3B0">the identity is the key, not the name</text>
+  <text x="2290" y="150" text-anchor="end" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8933A">tincan</text>
+  <text x="2290" y="192" text-anchor="end" font-family="Menlo, monospace" font-size="24" fill="#6B7885">github.com/rockerritesh/tincan</text>
+  <line x1="110" y1="272" x2="2290" y2="272" stroke="#2C3742" stroke-width="2"/>
+
+  <!-- Panel A: key -->
+  <rect x="110" y="320" width="1400" height="180" rx="6" fill="#151C24" stroke="#E8933A" stroke-width="3"/>
+  <text x="146" y="372" font-family="Menlo, monospace" font-size="24" fill="#6B7885" letter-spacing="3">LAYER 1 &#183; KEY</text>
+  <text x="146" y="464" font-family="Menlo, monospace" font-size="40" font-weight="700" fill="#E8933A">ed25519 private key &#183; never leaves the machine</text>
+
+  <!-- Panel B: fingerprint -->
+  <rect x="110" y="530" width="1400" height="180" rx="6" fill="#151C24" stroke="#37A8A0" stroke-width="3"/>
+  <text x="146" y="582" font-family="Menlo, monospace" font-size="24" fill="#6B7885" letter-spacing="3">LAYER 2 &#183; FINGERPRINT</text>
+  <text x="146" y="674" font-family="Menlo, monospace" font-size="40" font-weight="700" fill="#37A8A0">tc1h4k7m2xq9&#8230; &#183; derived, cannot be chosen</text>
+
+  <!-- Panel C: local alias -->
+  <rect x="110" y="740" width="1400" height="180" rx="6" fill="#151C24" stroke="#2C3742" stroke-width="3"/>
+  <text x="146" y="792" font-family="Menlo, monospace" font-size="24" fill="#6B7885" letter-spacing="3">LAYER 3 &#183; LOCAL ALIAS</text>
+  <text x="146" y="884" font-family="Menlo, monospace" font-size="40" font-weight="700" fill="#E8EDF2">bob &#183; yours, and only yours</text>
+
+  <!-- ON THE WIRE column -->
+  <rect x="1610" y="320" width="680" height="600" rx="6" fill="#151C24" stroke="#2C3742" stroke-width="3"/>
+  <text x="1646" y="372" font-family="Menlo, monospace" font-size="24" fill="#6B7885" letter-spacing="3">ON THE WIRE</text>
+
+  <!-- key: struck, never travels -->
+  <rect x="1646" y="398" width="608" height="130" rx="4" fill="#1B242E" stroke="#2C3742" stroke-width="2" stroke-dasharray="6 6"/>
+  <text x="1676" y="452" font-family="Menlo, monospace" font-size="32" fill="#6B7885">private key</text>
+  <line x1="1676" y1="442" x2="1906" y2="442" stroke="#6B7885" stroke-width="3"/>
+  <text x="1676" y="500" font-family="Menlo, monospace" font-size="24" fill="#6B7885">never travels</text>
+
+  <!-- fingerprint: active, the only thing sent -->
+  <rect x="1646" y="555" width="608" height="130" rx="4" fill="#12262A" stroke="#37A8A0" stroke-width="3"/>
+  <text x="1676" y="609" font-family="Menlo, monospace" font-size="32" font-weight="700" fill="#37A8A0">tc1h4k7m2xq9&#8230;</text>
+  <text x="1676" y="657" font-family="Menlo, monospace" font-size="24" fill="#97A3B0">the only thing sent</text>
+
+  <!-- alias: struck, never travels -->
+  <rect x="1646" y="712" width="608" height="130" rx="4" fill="#1B242E" stroke="#2C3742" stroke-width="2" stroke-dasharray="6 6"/>
+  <text x="1676" y="766" font-family="Menlo, monospace" font-size="32" fill="#6B7885">bob</text>
+  <line x1="1676" y1="756" x2="1786" y2="756" stroke="#6B7885" stroke-width="3"/>
+  <text x="1676" y="814" font-family="Menlo, monospace" font-size="24" fill="#6B7885">never travels</text>
+
+  <text x="1646" y="884" font-family="Menlo, monospace" font-size="24" fill="#37A8A0">only the fingerprint leaves this machine</text>
+
+  <!-- the one arrow that crosses: fingerprint only -->
+  <path d="M1510,620 L1640,620" stroke="#37A8A0" stroke-width="6" fill="none" marker-end="url(#te)"/>
+
+  <!-- THE ATTACK -->
+  <text x="110" y="970" font-family="Menlo, monospace" font-size="26" font-weight="700" fill="#E5766E" letter-spacing="2">THE ATTACK</text>
+
+  <rect x="110" y="1010" width="650" height="170" rx="6" fill="#2A1518" stroke="#E5766E" stroke-width="3"/>
+  <text x="146" y="1062" font-family="Menlo, monospace" font-size="24" fill="#E5766E" letter-spacing="3">ATTACKER</text>
+  <text x="146" y="1122" font-family="Menlo, monospace" font-size="36" font-weight="700" fill="#E8EDF2">advertises label "bob"</text>
+  <text x="146" y="1166" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">no key behind that name</text>
+
+  <path d="M760,1095 L1428,1095" stroke="#E5766E" stroke-width="6" fill="none"/>
+  <circle cx="1465" cy="1095" r="42" fill="none" stroke="#E5766E" stroke-width="5"/>
+  <line x1="1436" y1="1066" x2="1494" y2="1124" stroke="#E5766E" stroke-width="8" stroke-linecap="round"/>
+  <line x1="1494" y1="1066" x2="1436" y2="1124" stroke="#E5766E" stroke-width="8" stroke-linecap="round"/>
+
+  <rect x="1500" y="1010" width="680" height="170" rx="6" fill="#151C24" stroke="#2C3742" stroke-width="3"/>
+  <text x="1536" y="1062" font-family="Menlo, monospace" font-size="24" fill="#6B7885" letter-spacing="3">YOUR ALIAS</text>
+  <text x="1536" y="1122" font-family="Menlo, monospace" font-size="36" font-weight="700" fill="#E8EDF2">alias "bob"</text>
+  <text x="1536" y="1166" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">already bound to a different fingerprint</text>
+
+  <text x="110" y="1258" font-family="Menlo, monospace" font-size="32" font-weight="700" fill="#E5766E">your alias points at a fingerprint you already recorded</text>
+</svg>

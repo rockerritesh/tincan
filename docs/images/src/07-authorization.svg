@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1350" viewBox="0 0 2400 1350">
+  <defs>
+    <marker id="gy" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8A97A5"/>
+    </marker>
+  </defs>
+  <rect width="2400" height="1350" fill="#0E1319"/>
+  <text x="110" y="168" font-family="Menlo, monospace" font-size="60" font-weight="700" fill="#E8EDF2">Authorization, before and after</text>
+  <text x="110" y="224" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="34" fill="#97A3B0">the same request, once believed and once verified</text>
+  <text x="2290" y="150" text-anchor="end" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8933A">tincan</text>
+  <text x="2290" y="192" text-anchor="end" font-family="Menlo, monospace" font-size="24" fill="#6B7885">github.com/rockerritesh/tincan</text>
+  <line x1="110" y1="272" x2="2290" y2="272" stroke="#2C3742" stroke-width="2"/>
+
+  <line x1="1200" y1="320" x2="1200" y2="1190" stroke="#2C3742" stroke-width="2" stroke-dasharray="8 10"/>
+
+  <!-- LEFT: 0.1.x -->
+  <rect x="110" y="320" width="1030" height="870" rx="6" fill="#241316" stroke="#E5766E" stroke-width="3"/>
+  <text x="150" y="395" font-family="Menlo, monospace" font-size="54" font-weight="700" fill="#E5766E">0.1.x</text>
+
+  <rect x="150" y="430" width="950" height="130" rx="5" fill="#1B242E" stroke="#6B7885" stroke-width="2"/>
+  <text x="180" y="503" font-family="Menlo, monospace" font-size="32" font-weight="700" fill="#E8EDF2">GET /v1/inbox?<tspan fill="#E5766E">agent=bob</tspan></text>
+
+  <path d="M625,560 L625,602" stroke="#8A97A5" stroke-width="5" fill="none" marker-end="url(#gy)"/>
+
+  <rect x="150" y="610" width="950" height="160" rx="5" fill="#151C24" stroke="#2C3742" stroke-width="3"/>
+  <text x="625" y="685" text-anchor="middle" font-family="Menlo, monospace" font-size="36" font-weight="700" fill="#E8EDF2">broker</text>
+  <text x="625" y="735" text-anchor="middle" font-family="Menlo, monospace" font-size="26" font-style="italic" fill="#E5766E">trusts the query string</text>
+
+  <path d="M625,770 L625,812" stroke="#8A97A5" stroke-width="5" fill="none" marker-end="url(#gy)"/>
+
+  <rect x="150" y="820" width="950" height="160" rx="5" fill="#241316" stroke="#E5766E" stroke-width="3"/>
+  <text x="625" y="912" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E5766E">returns bob&#8217;s messages</text>
+
+  <text x="625" y="1080" text-anchor="middle" font-family="Menlo, monospace" font-size="30" font-style="italic" fill="#E5766E">the agent parameter was believed</text>
+
+  <!-- RIGHT: 0.2.0 -->
+  <rect x="1260" y="320" width="1030" height="870" rx="6" fill="#0F2224" stroke="#37A8A0" stroke-width="3"/>
+  <text x="1300" y="395" font-family="Menlo, monospace" font-size="54" font-weight="700" fill="#37A8A0">0.2.0</text>
+
+  <rect x="1300" y="430" width="950" height="130" rx="5" fill="#1B242E" stroke="#37A8A0" stroke-width="2"/>
+  <text x="1330" y="480" font-family="Menlo, monospace" font-size="32" font-weight="700" fill="#E8EDF2">GET /v1/inbox</text>
+  <text x="1330" y="522" font-family="Menlo, monospace" font-size="23" fill="#37A8A0">+ x-agent-fp &#183; x-timestamp &#183; x-nonce &#183; x-signature &#183; x-key-id</text>
+
+  <path d="M1775,560 L1775,598" stroke="#8A97A5" stroke-width="5" fill="none" marker-end="url(#gy)"/>
+
+  <rect x="1300" y="600" width="950" height="55" rx="4" fill="#12262A" stroke="#37A8A0" stroke-width="2"/>
+  <text x="1330" y="637" font-family="Menlo, monospace" font-size="26" font-weight="700" fill="#37A8A0">1 &#183; headers present</text>
+
+  <rect x="1300" y="661" width="950" height="55" rx="4" fill="#12262A" stroke="#37A8A0" stroke-width="2"/>
+  <text x="1330" y="698" font-family="Menlo, monospace" font-size="26" font-weight="700" fill="#37A8A0">2 &#183; freshness ok</text>
+
+  <rect x="1300" y="722" width="950" height="55" rx="4" fill="#12262A" stroke="#37A8A0" stroke-width="2"/>
+  <text x="1330" y="759" font-family="Menlo, monospace" font-size="26" font-weight="700" fill="#37A8A0">3 &#183; replay checked</text>
+
+  <rect x="1300" y="783" width="950" height="55" rx="4" fill="#12262A" stroke="#37A8A0" stroke-width="2"/>
+  <text x="1330" y="820" font-family="Menlo, monospace" font-size="26" font-weight="700" fill="#37A8A0">4 &#183; signature valid</text>
+
+  <rect x="1300" y="844" width="950" height="55" rx="4" fill="#12262A" stroke="#37A8A0" stroke-width="2"/>
+  <text x="1330" y="881" font-family="Menlo, monospace" font-size="26" font-weight="700" fill="#37A8A0">5 &#183; registry match</text>
+
+  <path d="M1775,899 L1775,933" stroke="#8A97A5" stroke-width="5" fill="none" marker-end="url(#gy)"/>
+
+  <rect x="1300" y="935" width="950" height="100" rx="5" fill="#2A2015" stroke="#E8933A" stroke-width="3"/>
+  <text x="1330" y="975" font-family="Menlo, monospace" font-size="28" font-weight="700" fill="#E8933A">claimed fields dropped</text>
+  <text x="1330" y="1015" font-family="Menlo, monospace" font-size="24" fill="#97A3B0">agent=bob</text>
+  <line x1="1330" y1="1006" x2="1470" y2="1006" stroke="#97A3B0" stroke-width="3"/>
+
+  <path d="M1775,1035 L1775,1068" stroke="#8A97A5" stroke-width="5" fill="none" marker-end="url(#gy)"/>
+
+  <rect x="1300" y="1070" width="950" height="100" rx="5" fill="#12262A" stroke="#37A8A0" stroke-width="3"/>
+  <text x="1775" y="1132" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#37A8A0">returns YOUR inbox</text>
+
+  <!-- bottom strip -->
+  <rect x="110" y="1230" width="2180" height="100" rx="6" fill="#151C24" stroke="#2C3742" stroke-width="3"/>
+  <text x="1200" y="1292" text-anchor="middle" font-family="Menlo, monospace" font-size="34" font-weight="700" fill="#E8EDF2">404, never 403 &#8212; not-yours and not-there must look identical</text>
+</svg>

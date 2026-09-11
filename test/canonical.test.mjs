@@ -78,11 +78,12 @@ test('golden vector: fixed key + fixed request yields a byte-exact signature', (
     'the fixed seed must always produce this public key',
   );
 
+  const bodyHash = bodySha256('{"to":"tc1abc","subject":"hi","body":"yo"}');
   const s = canonicalString({
     method: 'POST',
     pathname: '/v1/messages',
     searchParams: new URLSearchParams(),
-    bodyHash: bodySha256('{"to":"tc1abc","subject":"hi","body":"yo"}'),
+    bodyHash,
     timestamp: 1757548800000,
     nonce: 'AAAAAAAAAAAAAAAAAAAAAA',
   });
@@ -97,6 +98,8 @@ test('golden vector: fixed key + fixed request yields a byte-exact signature', (
     s.replace('/v1/messages', '/v1/inbox'),
     s.replace('1757548800000', '1757548800001'),
     s.replace('TINCAN-v1', 'TINCAN-v2'),
+    s.replace(bodyHash, 'MUTATED_HASH'),
+    s.replace('AAAAAAAAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBBBBBBBBBBB'),
   ]) {
     assert.equal(
       crypto.verify(null, Buffer.from(mutated, 'utf8'), pub, Buffer.from(sig, 'base64url')),

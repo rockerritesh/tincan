@@ -114,3 +114,20 @@ test('peers.json and its directory are private to the owner', () => {
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.equal(fs.statSync(home).mode & 0o777, 0o700);
 });
+
+test('a pre-existing, loosely-permissioned home directory is tightened, not trusted', () => {
+  const home = tempDir('peers');
+  fs.chmodSync(home, 0o755);
+  assert.equal(fs.statSync(home).mode & 0o777, 0o755, 'sanity check the directory really is loose first');
+
+  new PeerBook({ home });
+
+  assert.equal(fs.statSync(home).mode & 0o777, 0o700, 'the directory must self-heal like the file already does');
+});
+
+test('a peer cannot advertise a label that collides with a real fingerprint', () => {
+  const b = book();
+  const { alias } = b.upsert({ fingerprint: fpB, label: fpA, status: 'active', linkedAt: 'now' });
+  assert.notEqual(alias, fpA, 'the alias must not be the string form of another fingerprint');
+  assert.equal(b.resolve(alias), fpB, 'the alias must resolve to the new peer, not be shadowed by fpA');
+});

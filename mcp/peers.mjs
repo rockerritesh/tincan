@@ -13,6 +13,7 @@ import { isFingerprint, shortFingerprint, normalizeBase32 } from '../shared/fing
 export class PeerBook {
   constructor({ home }) {
     fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+    fs.chmodSync(home, 0o700);
     this.file = path.join(home, 'peers.json');
     this.peers = this.#load();
   }
@@ -34,7 +35,12 @@ export class PeerBook {
   }
 
   #freeAlias(label) {
-    const base = String(label).trim() || 'peer';
+    const trimmed = String(label).trim();
+    // A peer picks its own advertised label, so it can advertise a string that
+    // is byte-identical to some other peer's real fingerprint. resolve() checks
+    // the fingerprint format first, so an alias shaped like a fingerprint would
+    // be permanently unreachable — silently shadowed by that literal lookup.
+    const base = (trimmed && !isFingerprint(trimmed)) ? trimmed : 'peer';
     if (!this.peers.some((p) => p.alias === base)) return { alias: base, collision: false };
     for (let n = 2; n < 1000; n += 1) {
       const candidate = `${base}-${n}`;

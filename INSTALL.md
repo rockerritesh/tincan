@@ -34,24 +34,24 @@ npm install
 npm test
 ```
 
-`npm test` should report 30 passing. It needs no network and no broker running.
+`npm test` should report 173 passing. It needs no network and no broker running.
 
-### Generate a token
+### Bootstrap the owner
 
-Skip this only if every agent is on the same trusted machine.
+The first agent needs an invite, and the broker has no one to issue it yet. Mint
+one from the broker host, where you already have filesystem access:
 
 ```bash
-mkdir -p ~/.agent-tunnel && (umask 077; openssl rand -hex 32 > ~/.agent-tunnel/broker-token)
-cat ~/.agent-tunnel/broker-token
+node server/bootstrap.mjs --data-dir ./data --label owner
 ```
 
-Keep that value. **Every machine uses the same token** — agents are told apart
-by `AGENT_ID`, not by credential.
+That prints one code. It is the only special case in the whole flow — every
+other agent is invited by an agent that already exists.
 
 ### Start it
 
 ```bash
-BROKER_TOKEN=$(cat ~/.agent-tunnel/broker-token) npm run broker
+npm run broker
 ```
 
 It binds `127.0.0.1:8787` and prints the folder it is serving. Confirm:
@@ -60,8 +60,17 @@ It binds `127.0.0.1:8787` and prints the folder it is serving. Confirm:
 curl -s http://127.0.0.1:8787/v1/health
 ```
 
-`"auth": "bearer"` means the token took effect. `"auth": "open"` means you
-started it without `BROKER_TOKEN` and anyone who can reach it can use it.
+`auth` always reads `"signature"` — every route but this one derives the caller
+from a signed request, not from a token, and `/v1/health` no longer discloses
+the data directory. An optional `BROKER_TOKEN` adds a coarse gate and a kill
+switch on top of that, unrelated to identity:
+
+```bash
+BROKER_TOKEN=$(openssl rand -hex 32) npm run broker
+```
+
+`/v1/health` stays reachable either way — it is deliberately exempt from the
+token check too, so this call cannot tell you whether one is set.
 
 ### Expose it
 
@@ -94,29 +103,32 @@ cd ~/tincan
 npm install
 ```
 
-Register the MCP server with Claude Code. **Change `AGENT_ID` on every
-machine** — it is the name other agents use to address this one. `BROKER_URL`
-and `BROKER_TOKEN` are identical everywhere.
+### Register an agent
+
+**`AGENT_LABEL` is the per-machine name.** There is no shared secret to copy.
 
 ```bash
 claude mcp add tincan --scope user \
-  --env AGENT_ID=laptop \
+  --env AGENT_LABEL=laptop \
   --env BROKER_URL=https://your-broker-url \
-  --env BROKER_TOKEN=your-shared-token \
   -- node ~/tincan/mcp/server.mjs
 ```
 
 `--scope user` makes the agent available in every project on that machine,
-which is usually what you want since the agent id names the *machine*. Use an
+which is usually what you want since the label names the *machine*. Use an
 absolute path to `server.mjs` for the same reason. Check it with
 `claude mcp get tincan`.
 
-Restart Claude Code, then ask the agent to call `broker_health`. You want
-`ok: true` and your own `AGENT_ID` back. Then `list_agents` shows every machine
-that has checked in.
+Restart Claude Code, then have the agent call `redeem_invite` with the code. From
+then on it has its own keypair at `~/.tincan/identity.json` and needs nothing
+else.
 
-Two machines must never share an `AGENT_ID` — they would compete for the same
-inbox.
+### Connect a friend
+
+On your agent: `create_invite`. Send the code to them over Signal, WhatsApp,
+anything you already trust — not through tincan. On their agent:
+`redeem_invite`. Then both of you run `list_peers`, compare the short
+fingerprints out loud, and call `verify_peer`.
 
 ### Start the monitor each session
 
@@ -138,7 +150,7 @@ have since been answered. `quiet: true` means there was nothing to do.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BROKER_TOKEN` | *(unset)* | Bearer token. Unset means every route is open. |
+| `BROKER_TOKEN` | *(unset)* | Optional coarse gate and kill switch. Not identity. |
 | `PORT` | `8787` | Listen port. |
 | `HOST` | `127.0.0.1` | Bind address. Leave as-is and use a tunnel. |
 | `DATA_DIR` | `./data` | The message folder. |
@@ -148,10 +160,13 @@ have since been answered. `quiet: true` means there was nothing to do.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AGENT_ID` | *(required)* | This machine's name. Unique per machine. |
+| `AGENT_LABEL` | *(required)* | This machine's name. Its identity is its keypair, not this. |
 | `BROKER_URL` | `http://127.0.0.1:8787` | Where the broker is. |
-| `BROKER_TOKEN` | *(unset)* | Must match the broker's. |
-| `AGENT_TUNNEL_HOME` | `~/.agent-tunnel` | Local outbox and download folder. |
+| `TINCAN_HOME` | `~/.tincan` | Keypair, peer book, outbox and downloads. |
+
+`AGENT_ID` is still accepted as a silent fallback for `AGENT_LABEL`, so a
+registration made before this rename keeps working — use `AGENT_LABEL` going
+forward.
 
 ---
 
@@ -159,15 +174,17 @@ have since been answered. `quiet: true` means there was nothing to do.
 
 From machine A, ask the agent to send:
 
-> send_message to `<machine-B-id>` with subject "hello" and body "testing"
+> send_message to `<alias from list_peers>` with subject "hello" and body "testing"
 
 On machine B, `check_inbox` should return it. Have B call `ack_message`, then
 have A call `message_status` — it should read `read`.
 
-From a shell instead:
+There is no shell equivalent: every route but `/v1/health` requires a request
+signed by a registered keypair, and only the MCP server holds one. The closest
+you can do from a shell is confirm the broker itself is up:
 
 ```bash
-curl -s -H "Authorization: Bearer $TOKEN" "$URL/v1/agents"
+curl -s "$URL/v1/health"
 ```
 
 ---
@@ -177,13 +194,20 @@ curl -s -H "Authorization: Bearer $TOKEN" "$URL/v1/agents"
 **`broker_unreachable`** — the broker is down or `BROKER_URL` is stale. Check
 `curl -s $BROKER_URL/v1/health`. If the tunnel restarted, the URL changed.
 
-**`401 unauthorized`** — token mismatch. `/v1/health` stays open on purpose, so
-health working while everything else 401s points at the token, not the network.
+**`401` with `error: "unauthorized"`** — `BROKER_TOKEN` mismatch, only possible
+if the broker was started with one set. `/v1/health` is exempt on purpose, so
+health working while every other call fails there points at the token, not the
+network.
+
+**A different `401`** (`clock_skew`, `bad_signature`, `replay`, `unknown_key`) —
+comes from request signing, not `BROKER_TOKEN`. `clock_skew` almost always
+means this machine's clock is wrong; `unknown_key` means this agent hasn't
+redeemed an invite on this broker yet.
 
 **Messages keep reappearing** — nothing acked them. Delivery is at-least-once by
 design; call `ack_message` once a message is handled.
 
-**`AGENT_ID env var is required`** — the MCP server started without it. Check
+**`AGENT_LABEL env var is required`** — the MCP server started without it. Check
 the `--env` flags on your `claude mcp add`.
 
 **A large message never arrives** — it is waiting on a decision. The recipient
@@ -216,6 +240,13 @@ cloudflared, creates an `agenttunnel` system user, writes
 the broker and tunnel come back on reboot. Code goes to `/opt/agent-tunnel`,
 the message folder to `/var/lib/agent-tunnel`.
 
+**Upgrading a host still running 0.1.x?** The broker refuses to start against
+that old data layout rather than half-migrating it — there is no migration.
+Point it at a fresh `DATA_DIR`, re-run bootstrap, and re-pair every agent; see
+the upgrade note in [README.md](README.md#deploying-the-broker-to-a-server).
+`deploy/push.sh` does not check the data layout before it ships, so this is a
+deliberate step, not something the deploy scripts do for you.
+
 ```bash
 BROKER_TOKEN=$(openssl rand -hex 32) bash deploy/install.sh
 ```
@@ -233,6 +264,12 @@ systemctl status agent-tunnel-broker agent-tunnel-cloudflared
 agent-tunnel-url
 ```
 
+On first run, `deploy/install.sh` also mints the owner's bootstrap invite and
+prints the code to its own stdout — once, with no redirection of its own. If
+you pipe or log this command's output (`| tee`, a CI job, and similar), that
+log now holds a live invite code. Run it interactively and redeem the code
+promptly instead.
+
 ---
 
 ## Uninstalling
@@ -240,7 +277,7 @@ agent-tunnel-url
 Agent machine:
 
 ```bash
-claude mcp remove tincan && rm -rf ~/tincan ~/.agent-tunnel
+claude mcp remove tincan && rm -rf ~/tincan ~/.tincan
 ```
 
 Broker host running as a service:

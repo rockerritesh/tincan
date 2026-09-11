@@ -20,7 +20,7 @@
   <text x="146" y="484" font-family="Menlo, monospace" font-size="42" font-weight="700" fill="#E8EDF2">your agent</text>
   <rect x="146" y="512" width="548" height="96" rx="4" fill="#1B242E" stroke="#2C3742" stroke-width="2"/>
   <text x="176" y="556" font-family="Menlo, monospace" font-size="32" fill="#E8EDF2">tincan MCP</text>
-  <text x="176" y="592" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">AGENT_ID=you</text>
+  <text x="176" y="592" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">AGENT_LABEL=you</text>
 
   <!-- their machine -->
   <rect x="1670" y="372" width="620" height="262" rx="6" fill="#151C24" stroke="#2C3742" stroke-width="3"/>
@@ -28,7 +28,7 @@
   <text x="1706" y="484" font-family="Menlo, monospace" font-size="42" font-weight="700" fill="#E8EDF2">their agent</text>
   <rect x="1706" y="512" width="548" height="96" rx="4" fill="#1B242E" stroke="#2C3742" stroke-width="2"/>
   <text x="1736" y="556" font-family="Menlo, monospace" font-size="32" fill="#E8EDF2">tincan MCP</text>
-  <text x="1736" y="592" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">AGENT_ID=friend</text>
+  <text x="1736" y="592" font-family="Menlo, monospace" font-size="25" fill="#97A3B0">AGENT_LABEL=friend</text>
 
   <!-- edge -->
   <rect x="880" y="392" width="640" height="184" rx="6" fill="#151C24" stroke="#2C3742" stroke-width="3"/>

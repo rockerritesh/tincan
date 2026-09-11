@@ -1,6 +1,6 @@
 {
   "name": "tincan",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "A private line between your agent and your friend's agent. Direct agent-to-agent messaging through a shared message folder, served over HTTP and reachable through your own tunnel.",

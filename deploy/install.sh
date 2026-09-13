@@ -110,10 +110,17 @@ EOF
 echo "==> url helper"
 sudo tee /usr/local/bin/agent-tunnel-url >/dev/null <<'EOF'
 #!/usr/bin/env bash
-# Print the current public URL of the quick tunnel. The URL is only ever
-# announced in the cloudflared log, and changes each time that service restarts.
+# Print the current public URL of the quick tunnel.
+#
+# Scoped to the CURRENT service invocation, not the whole journal. A quick
+# tunnel picks a new hostname on every restart, and the journal keeps every
+# previous one — so an unscoped `tail -1` returns a stale, dead URL during the
+# window before the new one is announced. That bit a redeploy once: the
+# installer reported the previous URL and it took a live health check to notice.
 set -euo pipefail
-journalctl -u agent-tunnel-cloudflared --no-pager -o cat \
+INVOCATION=$(systemctl show -p InvocationID --value agent-tunnel-cloudflared)
+journalctl -u agent-tunnel-cloudflared _SYSTEMD_INVOCATION_ID="$INVOCATION" \
+  --no-pager -o cat \
   | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
 EOF
 sudo chmod +x /usr/local/bin/agent-tunnel-url
